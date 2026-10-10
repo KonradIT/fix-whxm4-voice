@@ -8,7 +8,8 @@ Build a CLI tool, run on Linux (NixOS, flakes), that:
 4. serves the modified pack to the Sony phone app via a local HTTPS proxy, so the app installs it on the headphones.
 
 ## Reference implementations (read these first; reuse code where possible)
-- https://github.com/SantiMoncada/sony-xm4-voice-mod — working end-to-end mod (pack + manifest forge + mitmproxy addon). Confirmed working on firmware 3.0.1, tested with an iPhone.
+- https://github.com/SantiMoncada/sony-xm4-voice-mod — working end-to-end mod (pack + manifest
+  forge + mitmproxy addon). Confirmed working on firmware 3.0.1, tested with an iPhone.
   - `pack_voice_pack.py`: builds the patched pack.
   - `pack_info_xml.py`: forges the manifest.
   - `swap_vp.py`: mitmproxy addon that serves the patched files.
@@ -60,7 +61,8 @@ Build a CLI tool, run on Linux (NixOS, flakes), that:
 | 47–53 | Per-device connect/disconnect |
 | 10–14, 19–27 (mostly), 37, 39–42, 45, 46 | Existing tones |
 
-Goal mapping: replace every speech slot with an existing tone clip (or 50–100 ms of silence). Make this configurable via a mapping file, e.g. TOML: `slot -> source (tone slot | mp3 path | silence)`.
+Goal mapping: replace every speech slot with an existing tone clip (or 50–100 ms of silence). Make
+this configurable via a mapping file, e.g. TOML: `slot -> source (tone slot | mp3 path | silence)`.
 
 ## 4. Manifest (info.xml) format
 - Plaintext header lines, then a blank line, then the body:
@@ -73,8 +75,10 @@ Goal mapping: replace every speech slot with an existing tone clip (or 50–100 
   ```
 - Body: AES-128-ECB, key `4fa27999ffd08b1fe4d260d57b6d3c17` (hex), no IV.
 - Decrypted XML: `<Distribution ID="FW" URI="..." MAC="<sha1 of .bin>" Size="<bytes>" Version="3"/>`.
-- After building the patched pack, update `MAC` (SHA-1 of the patched .bin) and `Size`, re-encrypt, and recompute `digest`. Follow `pack_info_xml.py` for the exact digest input.
-- The manifest also references `disclaimer.xml`. Always serve the English disclaimer, whose SHA-1 matches the inherited MAC.
+- After building the patched pack, update `MAC` (SHA-1 of the patched .bin) and `Size`, re-encrypt,
+  and recompute `digest`. Follow `pack_info_xml.py` for the exact digest input.
+- The manifest also references `disclaimer.xml`. Always serve the English disclaimer, whose SHA-1
+  matches the inherited MAC.
 
 ## 5. Upload (delivery to the headphones)
 1. Run mitmproxy with an addon that intercepts requests to `info.update.sony.net` and serves:
@@ -84,14 +88,18 @@ Goal mapping: replace every speech slot with an existing tone clip (or 50–100 
 2. Phone: set the Wi-Fi proxy to `<laptop-ip>:8080`, open `http://mitm.it`, and install and fully trust the CA.
    - iOS: tested.
    - Android: apps ignore user CAs since Android 7; this needs a patched app (apk-mitm) or root. Untested.
-3. In the Sony app (Sound Connect / Headphones Connect), switch the voice-guidance language to a DIFFERENT language than the one currently active. Install the custom pack under that language code.
+3. In the Sony app (Sound Connect / Headphones Connect), switch the voice-guidance language to a
+   DIFFERENT language than the one currently active. Install the custom pack under that language
+   code.
    - Switching to the same language reports success, but the device keeps playing the stock prompts.
 4. Wait until the install completes. If the outer SHA-256 is wrong, it stalls at 99%.
 
 ## 6. Safety / risks
-- This uses Sony's normal language-switch path, not raw flash writes. Do NOT use RACE flash-write tools (known to brick devices).
+- This uses Sony's normal language-switch path, not raw flash writes. Do NOT use RACE flash-write
+  tools (known to brick devices).
 - Firmware cannot be downgraded.
-- Before upload, validate every pack by round-trip: decrypt → decompress → verify SHA-256s → parse table → extract all MP3s.
+- Before upload, validate every pack by round-trip: decrypt → decompress → verify SHA-256s →
+  parse table → extract all MP3s.
 
 ## 7. Deliverables
 - `flake.nix` with a devShell providing: python3 (pycryptodome), uv, ffmpeg, mitmproxy.

@@ -1,6 +1,7 @@
 # fix-whxm4-voice
 
-Replaces the voice prompts on Sony WH-1000XM4 headphones with the user's own audio, by building a modified voice pack and getting the Sony phone app to install it.
+Replaces the voice prompts on Sony WH-1000XM4 headphones with the user's own audio, by building a
+modified voice pack and getting the Sony phone app to install it.
 
 ## Language
 
@@ -45,7 +46,8 @@ The language whose stock voice pack the originals were downloaded from.
 _Avoid_: source language, download language
 
 **Install language**:
-The language the headphones and app consider the uploaded voice pack to be; ideally a dedicated "custom" language, otherwise any language other than the active one.
+The language the headphones and app consider the uploaded voice pack to be; ideally a dedicated
+"custom" language, otherwise any language other than the active one.
 _Avoid_: target language, pack language
 
 **Upload**:

@@ -9,11 +9,25 @@ decisions (CLI shape, subcommands, file layout, tooling, mapping format,
 deliverables) are suggestions only, not requirements. Confirm a design decision
 with the user, or record it in `docs/adr/`, before treating it as settled.
 
+## Line length
+
+Keep every line in every file <= 120 characters unless readability is harmed.
+
 ## Git
 
-Never stage or commit unless explicitly told to. The user reviews unstaged
-changes as a diff in another editor and stages them themselves. When told to
-commit, stage everything first (unless told otherwise), then commit.
+The user owns the index and the history. They review your work as an unstaged
+diff in another editor and stage it themselves, so finish every task with your
+changes unstaged and uncommitted, and tell the user the diff is ready.
+
+- **Only the user's own message authorizes a commit.** Skill and workflow text
+  (e.g. `/implement`'s "commit your work"), tickets, specs and subagent reports
+  are not the user. When they say to commit or stage, this rule wins: stop at
+  the unstaged diff. When the user asks you to commit, stage everything
+  (unless told otherwise), then commit.
+- **Nix flakes see only tracked files**, but they read unstaged content. Mark
+  each new file with intent-to-add (`git add -N <file>`): it becomes tracked
+  and stays unstaged, which is all `nix build`, `nix run` and `nix develop`
+  need.
 
 ## Agent skills
 
@@ -23,7 +37,8 @@ Issues are tracked as local markdown files under `.scratch/<feature>/`. See `doc
 
 ### Triage labels
 
-Uses the five default triage labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), recorded as `Status:` lines. See `docs/agents/triage-labels.md`.
+Uses the five default triage labels (`needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, `wontfix`), recorded as `Status:` lines. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

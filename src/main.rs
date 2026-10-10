@@ -2,7 +2,8 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use fix_whxm4_voice::build::build;
 use fix_whxm4_voice::download::download;
 use fix_whxm4_voice::source::BaseLanguage;
@@ -42,6 +43,12 @@ enum Command {
     },
     /// Show what the headphones report about themselves
     DeviceInfo,
+    /// Print a shell completion script to stdout
+    Completions {
+        /// Shell to print the script for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 fn main() -> ExitCode {
@@ -77,6 +84,12 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             not_implemented("upload")
         }
         Some(Command::DeviceInfo) => not_implemented("device-info"),
+        Some(Command::Completions { shell }) => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, name, &mut io::stdout());
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 

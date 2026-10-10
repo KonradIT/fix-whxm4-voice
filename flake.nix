@@ -19,10 +19,19 @@
           version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.makeWrapper ];
+          nativeBuildInputs = [
+            pkgs.makeWrapper
+            pkgs.installShellFiles
+          ];
           postInstall = ''
             wrapProgram $out/bin/fix-whxm4-voice \
               --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg ]}
+          ''
+          + pkgs.lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+            installShellCompletion --cmd fix-whxm4-voice \
+              --bash <($out/bin/fix-whxm4-voice completions bash) \
+              --zsh <($out/bin/fix-whxm4-voice completions zsh) \
+              --fish <($out/bin/fix-whxm4-voice completions fish)
           '';
           meta.mainProgram = "fix-whxm4-voice";
         };

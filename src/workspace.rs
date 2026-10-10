@@ -9,6 +9,9 @@ pub struct Workspace {
     pub original: PathBuf,
     pub changes: PathBuf,
     pub build: PathBuf,
+    /// Hidden folder keeping the stock voice pack and manifest, so they are never mistaken for
+    /// originals. Created when they are first saved.
+    pub stock: PathBuf,
 }
 
 impl Workspace {
@@ -21,6 +24,7 @@ impl Workspace {
             original: dir.join(FOLDERS[0]),
             changes: dir.join(FOLDERS[1]),
             build: dir.join(FOLDERS[2]),
+            stock: dir.join(".stock"),
         };
         let folders = [&ws.original, &ws.changes, &ws.build];
         if !force && folders.iter().any(|folder| !folder.is_dir()) {

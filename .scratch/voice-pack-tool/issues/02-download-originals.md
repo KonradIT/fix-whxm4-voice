@@ -7,13 +7,13 @@ the manifest's size and SHA-1, unpacks it, and writes all 54 **clips** into `ori
 
 **Blocked by:** 01 (Workspace and flake skeleton)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] All ten base languages are selectable by name with `--lang`; English is the default
-- [ ] The manifest is decoded (header lines, AES-128-ECB body, `Distribution` MAC and Size) and the
+- [x] All ten base languages are selectable by name with `--lang`; English is the default
+- [x] The manifest is decoded (header lines, AES-128-ECB body, `Distribution` MAC and Size) and the
       downloaded pack is rejected if size or SHA-1 mismatch
-- [ ] The pack is unpacked: outer SHA-256 checked, metadata block read, body decrypted (AES-128-CBC)
+- [x] The pack is unpacked: outer SHA-256 checked, metadata block read, body decrypted (AES-128-CBC)
       and decompressed (raw LZMA1), unpacked-image SHA-256 checked, slot table parsed
-- [ ] A slot catalogue names every slot by its prompt; unknown slots are named `unknown`
-- [ ] 54 files are written to `original/`, sorted by slot number, and play in mpv
-- [ ] The stock pack (and manifest) is kept so later builds can reuse its metadata without downloading again
+- [x] A slot catalogue names every slot by its prompt; unknown slots are named `unknown`
+- [x] 54 files are written to `original/`, sorted by slot number, and play in mpv
+- [x] The stock pack (and manifest) is kept so later builds can reuse its metadata without downloading again

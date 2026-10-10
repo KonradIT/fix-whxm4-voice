@@ -2,7 +2,9 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
+use fix_whxm4_voice::download::download;
+use fix_whxm4_voice::source::BaseLanguage;
 use fix_whxm4_voice::workspace::Workspace;
 
 /// Replace the voice prompts on Sony WH-1000XM4 headphones.
@@ -41,20 +43,6 @@ enum Command {
     DeviceInfo,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum BaseLanguage {
-    English,
-    French,
-    German,
-    Spanish,
-    Italian,
-    Portuguese,
-    Dutch,
-    Swedish,
-    Finnish,
-    Turkish,
-}
-
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(code) => code,
@@ -71,9 +59,11 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             open_workspace(&cli.dir, cli.force)?;
             not_implemented("the default workflow")
         }
-        Some(Command::Download { lang: _ }) => {
-            open_workspace(&cli.dir, cli.force)?;
-            not_implemented("download")
+        Some(Command::Download { lang }) => {
+            let ws = open_workspace(&cli.dir, cli.force)?;
+            let count = download(&ws, lang)?;
+            eprintln!("saved {count} originals in {}", ws.original.display());
+            Ok(ExitCode::SUCCESS)
         }
         Some(Command::Build) => {
             open_workspace(&cli.dir, cli.force)?;

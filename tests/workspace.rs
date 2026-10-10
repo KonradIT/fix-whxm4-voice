@@ -49,6 +49,7 @@ fn empty_directory_gets_folders_without_asking() {
     assert_eq!(ws.original, tmp.path().join("original"));
     assert_eq!(ws.changes, tmp.path().join("changes"));
     assert_eq!(ws.build, tmp.path().join("build"));
+    assert_eq!(ws.stock, tmp.path().join(".stock"));
 }
 
 #[test]

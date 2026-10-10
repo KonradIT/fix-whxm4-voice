@@ -7,7 +7,8 @@ use clap_complete::Shell;
 use fix_whxm4_voice::build::build;
 use fix_whxm4_voice::download::download;
 use fix_whxm4_voice::generate;
-use fix_whxm4_voice::source::BaseLanguage;
+use fix_whxm4_voice::source::{self, BaseLanguage};
+use fix_whxm4_voice::workflow;
 use fix_whxm4_voice::workspace::Workspace;
 
 /// Replace the voice prompts on Sony WH-1000XM4 headphones.
@@ -23,6 +24,10 @@ struct Cli {
     #[arg(short = 'f', long = "force", global = true)]
     force: bool,
 
+    /// Base language to download the originals in
+    #[arg(long, global = true, value_enum, default_value_t = BaseLanguage::English)]
+    lang: BaseLanguage,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -30,11 +35,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Download the stock voice pack and save its clips in original/
-    Download {
-        /// Base language to download
-        #[arg(long, value_enum, default_value_t = BaseLanguage::English)]
-        lang: BaseLanguage,
-    },
+    Download,
     /// Generate a theme of tone clips into changes/
     ///
     /// The theme is modern and calm: warm, soft tones that ring out like something struck. Power on
@@ -75,12 +76,25 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> io::Result<ExitCode> {
     match cli.command {
         None => {
-            open_workspace(&cli.dir, cli.force)?;
-            not_implemented("the default workflow")
-        }
-        Some(Command::Download { lang }) => {
             let ws = open_workspace(&cli.dir, cli.force)?;
-            let count = download(&ws, lang)?;
+            match workflow::prepare(&ws, cli.lang, source::fetch)? {
+                Some(count) => eprintln!("saved {count} originals in {}", ws.original.display()),
+                None => eprintln!(
+                    "originals already in {}, skipping the download",
+                    ws.original.display()
+                ),
+            }
+            let upload = if cli.dir == Path::new(".") {
+                "fix-whxm4-voice upload".to_string()
+            } else {
+                format!("fix-whxm4-voice -d {} upload", cli.dir.display())
+            };
+            eprintln!("\n{}", workflow::next_steps(&ws, &upload));
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Command::Download) => {
+            let ws = open_workspace(&cli.dir, cli.force)?;
+            let count = download(&ws, cli.lang)?;
             eprintln!("saved {count} originals in {}", ws.original.display());
             Ok(ExitCode::SUCCESS)
         }

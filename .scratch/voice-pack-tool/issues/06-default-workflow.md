@@ -8,8 +8,8 @@ in ticket 10.
 
 **Blocked by:** 02 (Download originals)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A first run in an empty directory ends with originals downloaded and next-step instructions printed
-- [ ] A re-run doesn't download again
-- [ ] The global flags `-d`, `-f` and `--lang` apply to the default command
+- [x] A first run in an empty directory ends with originals downloaded and next-step instructions printed
+- [x] A re-run doesn't download again
+- [x] The global flags `-d`, `-f` and `--lang` apply to the default command

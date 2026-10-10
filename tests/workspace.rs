@@ -1,31 +1,9 @@
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+mod common;
 
+use std::path::Path;
+
+use common::TempDir;
 use fix_whxm4_voice::workspace::{FOLDERS, Workspace};
-
-/// A fresh empty directory, removed again on drop.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Self {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("fix-whxm4-voice-test-{}-{n}", std::process::id()));
-        std::fs::create_dir(&dir).unwrap();
-        TempDir(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn never_asked(_: &Path, _: &[String]) -> std::io::Result<bool> {
     panic!("asked for confirmation")

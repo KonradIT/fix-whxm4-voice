@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use fix_whxm4_voice::build::build;
 use fix_whxm4_voice::download::download;
 use fix_whxm4_voice::source::BaseLanguage;
 use fix_whxm4_voice::workspace::Workspace;
@@ -66,8 +67,10 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Command::Build) => {
-            open_workspace(&cli.dir, cli.force)?;
-            not_implemented("build")
+            let ws = open_workspace(&cli.dir, cli.force)?;
+            let path = build(&ws)?;
+            eprintln!("built and verified {}", path.display());
+            Ok(ExitCode::SUCCESS)
         }
         Some(Command::Upload { dry_run: _ }) => {
             open_workspace(&cli.dir, cli.force)?;

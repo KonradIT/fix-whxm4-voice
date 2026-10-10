@@ -1,3 +1,4 @@
+pub mod build;
 pub mod download;
 pub mod keys;
 pub mod manifest;

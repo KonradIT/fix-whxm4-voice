@@ -13,11 +13,12 @@
 //! slot, then the clips back to back, zero-padded to 1 MiB. Offsets are absolute in the voice
 //! partition; the partition base is the first offset minus the end of the table.
 
-use std::io;
+use std::io::{self, Read, Write};
 
 use aes::Aes128;
 use aes::cipher::block_padding::NoPadding;
-use aes::cipher::{BlockModeDecrypt, KeyIvInit};
+use aes::cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
+use lzma_rust2::{LzmaOptions, LzmaReader, LzmaWriter};
 use sha2::{Digest, Sha256};
 
 use crate::invalid;
@@ -30,8 +31,12 @@ const METADATA_OFFSET: usize = 0x100;
 const BODY_OFFSET: usize = 0x1000;
 /// Size of the unpacked image.
 pub const IMAGE_SIZE: usize = 0x10_0000;
+/// Size of the slot table at the start of the unpacked image.
+const TABLE_SIZE: usize = 8 + 8 * SLOT_COUNT;
 /// Compression type of an LZMA1 body.
 const LZMA: u8 = 2;
+/// LZMA1 dictionary size of stock packs, which the headphones' decoder is known to handle.
+const LZMA_DICT_SIZE: u32 = 0x4000;
 
 const TAG_COMPRESSION: u16 = 0x0011;
 const TAG_SIZES: u16 = 0x0012;
@@ -51,6 +56,7 @@ pub struct Unpacked {
 }
 
 /// The metadata block at 0x100.
+#[derive(Clone)]
 pub struct Metadata {
     pub compression_type: u8,
     /// Second byte of tag 0x0011; meaning unknown, 1 in stock packs.
@@ -124,6 +130,110 @@ pub fn unpack(pack: &[u8]) -> io::Result<Unpacked> {
     })
 }
 
+/// Puts a voice pack together from the clips, image version and partition base in `unpacked`,
+/// the inverse of [`unpack`]. Of the metadata, only the fields stock packs leave unexplained or
+/// constant carry over; the compression type, offsets, sizes and the image SHA-256 are written
+/// anew, and the outer SHA-256 is computed last.
+pub fn pack(unpacked: &Unpacked) -> io::Result<Vec<u8>> {
+    let image = write_image(unpacked)?;
+    let mut body = compress(&image)?;
+    body.resize(body.len().next_multiple_of(16), 0xFF);
+    encrypt(&mut body);
+
+    let metadata = Metadata {
+        compression_type: LZMA,
+        body_offset: BODY_OFFSET as u32,
+        body_size: body.len() as u32,
+        header_size: BODY_OFFSET as u32,
+        unpacked_size: IMAGE_SIZE as u32,
+        image_sha256: Sha256::digest(&image).into(),
+        ..unpacked.metadata.clone()
+    };
+    let mut pack = vec![0xFF; BODY_OFFSET];
+    write_metadata(&metadata, &mut pack[METADATA_OFFSET..])?;
+    pack.extend(body);
+    let sha = Sha256::digest(&pack[METADATA_OFFSET..]);
+    pack[..32].copy_from_slice(&sha);
+    Ok(pack)
+}
+
+/// Writes the metadata tags in the order stock packs use. The 0xFF filler after them ends the block.
+fn write_metadata(metadata: &Metadata, block: &mut [u8]) -> io::Result<()> {
+    let mut compression = vec![metadata.compression_type, metadata.compression_unknown];
+    compression.extend(metadata.body_offset.to_le_bytes());
+    compression.extend(metadata.body_size.to_le_bytes());
+    let sizes: Vec<u8> = [
+        metadata.version,
+        metadata.header_size,
+        metadata.unpacked_size,
+        metadata.sizes_constant,
+    ]
+    .iter()
+    .flat_map(|field| field.to_le_bytes())
+    .collect();
+    let mut image_hash = metadata.hash_algorithm.to_le_bytes().to_vec();
+    image_hash.extend(metadata.image_sha256);
+
+    let mut pos = 0;
+    for (tag, value) in [
+        (TAG_COMPRESSION, &compression),
+        (TAG_VERSION_STRING, &metadata.version_string),
+        (TAG_SIZES, &sizes),
+        (TAG_IMAGE_HASH, &image_hash),
+    ] {
+        let entry = block
+            .get_mut(pos..pos + 4 + value.len())
+            .ok_or_else(|| invalid("metadata does not fit in the header"))?;
+        entry[..2].copy_from_slice(&tag.to_le_bytes());
+        entry[2..4].copy_from_slice(&(value.len() as u16).to_le_bytes());
+        entry[4..].copy_from_slice(value);
+        pos += entry.len();
+    }
+    Ok(())
+}
+
+/// The unpacked image: version, slot count, slot table, the clips back to back, zero padding.
+fn write_image(unpacked: &Unpacked) -> io::Result<Vec<u8>> {
+    let clips = &unpacked.clips;
+    if clips.len() != SLOT_COUNT {
+        return Err(invalid(format!(
+            "{} clips given, a voice pack has {SLOT_COUNT} slots",
+            clips.len()
+        )));
+    }
+    let size = TABLE_SIZE + clips.iter().map(Vec::len).sum::<usize>();
+    if size > IMAGE_SIZE {
+        return Err(invalid(format!(
+            "the clips and slot table take {size} bytes, more than the 1 MiB ({IMAGE_SIZE} bytes) \
+             of the unpacked image"
+        )));
+    }
+
+    let mut image = Vec::with_capacity(IMAGE_SIZE);
+    image.extend(unpacked.image_version.to_le_bytes());
+    image.extend((SLOT_COUNT as u32).to_le_bytes());
+    let mut offset = unpacked.partition_base as usize + TABLE_SIZE;
+    for clip in clips {
+        let absolute = u32::try_from(offset)
+            .map_err(|_| invalid("slot offsets run past the 4 GiB address space"))?;
+        image.extend((clip.len() as u32).to_le_bytes());
+        image.extend(absolute.to_le_bytes());
+        offset += clip.len();
+    }
+    for clip in clips {
+        image.extend(clip);
+    }
+    image.resize(IMAGE_SIZE, 0);
+    Ok(image)
+}
+
+fn encrypt(body: &mut [u8]) {
+    let len = body.len();
+    cbc::Encryptor::<Aes128>::new(&PACK_KEY.into(), &PACK_IV.into())
+        .encrypt_padded::<NoPadding>(body, len)
+        .expect("the body is padded to whole AES blocks");
+}
+
 fn read_metadata(block: &[u8]) -> io::Result<Metadata> {
     let mut compression = None;
     let mut sizes = None;
@@ -193,10 +303,26 @@ fn decrypt(body: &[u8]) -> io::Result<Vec<u8>> {
 /// Decompresses a 13-byte LZMA1 header plus raw stream. The 0xFF padding after the stream is
 /// never read, because the header gives the unpacked size.
 fn decompress(stream: &[u8]) -> io::Result<Vec<u8>> {
+    let does_not_decompress = |e| invalid(format!("voice pack body does not decompress: {e}"));
     let mut image = Vec::with_capacity(IMAGE_SIZE);
-    lzma_rs::lzma_decompress(&mut io::BufReader::new(stream), &mut image)
-        .map_err(|e| invalid(format!("voice pack body does not decompress: {e}")))?;
+    LzmaReader::new_mem_limit(stream, u32::MAX, None)
+        .map_err(does_not_decompress)?
+        // One byte more than an image may hold, so an oversized stream shows without reading it all.
+        .take(IMAGE_SIZE as u64 + 1)
+        .read_to_end(&mut image)
+        .map_err(does_not_decompress)?;
     Ok(image)
+}
+
+/// Compresses the image the way stock packs are: a 13-byte LZMA1 header giving the unpacked size,
+/// then the raw stream without an end marker.
+fn compress(image: &[u8]) -> io::Result<Vec<u8>> {
+    let mut options = LzmaOptions::with_preset(6);
+    options.dict_size = LZMA_DICT_SIZE;
+    (options.lc, options.lp, options.pb) = (3, 0, 2);
+    let mut writer = LzmaWriter::new(Vec::new(), &options, true, false, Some(image.len() as u64))?;
+    writer.write_all(image)?;
+    writer.finish()
 }
 
 fn read_image(image: &[u8]) -> io::Result<(u32, u32, Vec<Vec<u8>>)> {
@@ -207,11 +333,10 @@ fn read_image(image: &[u8]) -> io::Result<(u32, u32, Vec<Vec<u8>>)> {
             "unpacked image has {count} slots, expected {SLOT_COUNT}"
         )));
     }
-    let table_end = 8 + 8 * count;
     let entry = |slot: usize| (u32_at(image, 8 + 8 * slot), u32_at(image, 12 + 8 * slot));
     let base = entry(0)
         .1
-        .checked_sub(table_end as u32)
+        .checked_sub(TABLE_SIZE as u32)
         .ok_or_else(|| invalid("slot 0 starts before the end of the slot table"))?;
 
     let mut clips = Vec::with_capacity(count);
@@ -220,7 +345,7 @@ fn read_image(image: &[u8]) -> io::Result<(u32, u32, Vec<Vec<u8>>)> {
         let start = offset
             .checked_sub(base)
             .map(|start| start as usize)
-            .filter(|&start| start >= table_end);
+            .filter(|&start| start >= TABLE_SIZE);
         let clip = start
             .and_then(|start| image.get(start..start + size as usize))
             .ok_or_else(|| invalid(format!("slot {slot} lies outside the unpacked image")))?;

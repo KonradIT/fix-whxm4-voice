@@ -6,6 +6,7 @@ pub mod generate;
 pub mod keys;
 pub mod manifest;
 pub mod pack;
+pub mod size;
 pub mod slots;
 pub mod source;
 pub mod workspace;

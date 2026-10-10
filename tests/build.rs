@@ -178,3 +178,30 @@ fn an_edited_original_is_refused_and_named() {
     assert!(error.contains("changes"), "{error}");
     assert!(!ws.build.join(BUILT_PACK).exists());
 }
+
+#[test]
+fn clips_larger_than_the_stock_clips_fail_with_a_report() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+    fs::write(ws.changes.join("00-song.wav"), vec![0; 100_000]).unwrap();
+
+    let error = error(&ws);
+
+    let stock_total: usize = clips().iter().map(Vec::len).sum();
+    assert!(error.contains("00-song.wav"), "{error}");
+    assert!(error.contains(&format!("limit {stock_total}")), "{error}");
+    assert!(error.contains("Trim changes in"), "{error}");
+    assert!(!ws.build.join(BUILT_PACK).exists());
+}
+
+#[test]
+fn a_change_larger_than_its_stock_clip_builds_when_the_total_fits() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+    fs::write(ws.changes.join("00-long.wav"), vec![0; 1000]).unwrap();
+    fs::write(ws.changes.join("53-short.wav"), b"short").unwrap();
+
+    let built = built_clips(&ws);
+
+    assert!(built[0].len() > clips()[0].len());
+}

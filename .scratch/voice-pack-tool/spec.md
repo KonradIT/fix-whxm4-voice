@@ -99,8 +99,9 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
     of the base language, so that the pack stays within what the headphones are known to accept.
 30. As a user, I want a failed size check to list each clip's size, the total, and the limit, so
     that I can see what to shorten.
-31. As a user, I want a failed size check to print a ready-to-run ffmpeg command for making clips
-    smaller, so that I can fix it without knowing ffmpeg.
+31. As a user, I want a failed size check to tell me that every clip is already at the bitrate of its
+    slot and that I should trim changes, or copy originals into `changes/` and trim them there, so
+    that I know shorter audio is the only fix.
 32. As a user, I want every built pack verified by unpacking it again (decrypt, decompress, check
     every checksum, read the slot table, read every clip), so that a broken pack never reaches the
     headphones.
@@ -181,7 +182,7 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
   to it. Silence becomes a short silent clip in the same format.
 - **Size check** (pure). Compares the total clip size to the limit. The limit is currently the stock
   clip total of the base language, kept in one place so it can later be replaced by a hardcoded
-  constant. Produces the per-file report and the suggested ffmpeg command.
+  constant. Produces the per-file report and asks for the changes to be trimmed.
 - **Pack source** (HTTP). Fetches the manifest and pack for a language from Sony's public update
   server (`info.update.sony.net/HP002/VGIDLPB04XX/…`, XX = language number 01–10).
 - **Device link** (Bluetooth LE through BlueZ, using the `bluer` crate). It connects to the update
@@ -235,7 +236,7 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
 - The upload route through the app and a proxy (fallback only, see ADR 0001).
 - Any write outside the voice partition, any firmware update, and any device or model other than the WH-1000XM4.
 - Android or iOS app patching, and certificate installation.
-- Automatically shrinking clips that don't fit. The user runs the suggested ffmpeg command.
+- Automatically shrinking clips that don't fit, and suggesting commands for it. The user trims the changes.
 - A hardcoded size limit. That comes later; for now the limit is the base language's stock total.
 - End-to-end tests, and tests that download files or need hardware.
 

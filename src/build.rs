@@ -9,6 +9,7 @@ use crate::changes::{self, Change};
 use crate::download::STOCK_PACK;
 use crate::invalid;
 use crate::pack::{self, Unpacked};
+use crate::size;
 use crate::slots::{SLOT_COUNT, clip_file_name};
 use crate::workspace::Workspace;
 
@@ -23,7 +24,7 @@ pub fn build(ws: &Workspace) -> io::Result<PathBuf> {
 /// Packs a clip per slot into a voice pack with the stock pack's metadata, verifies it by unpacking
 /// it again, and writes it to `build/`. Each slot gets its change from `changes/`, converted by
 /// `convert` to the format of the stock clip it replaces, or else its original. Returns the path of
-/// the built pack.
+/// the built pack. Fails with a report if the clips are larger than the [`size::limit`].
 pub fn build_with(ws: &Workspace, convert: &dyn Convert) -> io::Result<PathBuf> {
     let stock = read_stock(&ws.stock.join(STOCK_PACK))?;
     let stock_image_sha256 = stock.metadata.image_sha256;
@@ -38,7 +39,7 @@ pub fn build_with(ws: &Workspace, convert: &dyn Convert) -> io::Result<PathBuf> 
             lines.join("\n")
         ))
     })?;
-    let clips = (0..SLOT_COUNT)
+    let clips: Vec<Vec<u8>> = (0..SLOT_COUNT)
         .map(|slot| {
             let stock_clip = &stock.clips[slot];
             match &resolved[slot] {
@@ -48,6 +49,7 @@ pub fn build_with(ws: &Workspace, convert: &dyn Convert) -> io::Result<PathBuf> 
             }
         })
         .collect::<io::Result<_>>()?;
+    size::check(&clips, &resolved, &size::limit(&stock.clips), ws).map_err(invalid)?;
     let unpacked = Unpacked { clips, ..stock };
     let built = pack::pack(&unpacked)?;
 

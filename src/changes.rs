@@ -130,7 +130,7 @@ pub fn resolve(changes: &[ChangeFile]) -> Result<Vec<Change>, Vec<Problem>> {
 }
 
 /// The slot whose number `name` starts with, or `None` if it starts with no slot number.
-fn slot(name: &str) -> Option<usize> {
+pub fn slot(name: &str) -> Option<usize> {
     let digits = name
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(name.len());

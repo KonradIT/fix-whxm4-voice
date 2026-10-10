@@ -6,6 +6,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use fix_whxm4_voice::build::build;
 use fix_whxm4_voice::download::download;
+use fix_whxm4_voice::generate;
 use fix_whxm4_voice::source::BaseLanguage;
 use fix_whxm4_voice::workspace::Workspace;
 
@@ -17,7 +18,8 @@ struct Cli {
     #[arg(short = 'd', long = "dir", global = true, default_value = ".")]
     dir: PathBuf,
 
-    /// Set up the workspace without asking, even in a directory holding other things
+    /// Set up the workspace without asking, even in a directory holding other things, and let
+    /// `generate` replace changes for the slots it generates
     #[arg(short = 'f', long = "force", global = true)]
     force: bool,
 
@@ -33,6 +35,15 @@ enum Command {
         #[arg(long, value_enum, default_value_t = BaseLanguage::English)]
         lang: BaseLanguage,
     },
+    /// Generate a theme of tone clips into changes/
+    ///
+    /// The theme is modern and calm: warm, soft tones that ring out like something struck. Power on
+    /// and connecting rise in pitch, power off and disconnecting fall, connections start with a dot
+    /// per device, a lost connection crackles, and a volume step is a short beep.
+    ///
+    /// The clips come from a bash script using ffmpeg, sounds/generate.sh in the project's
+    /// repository on GitHub. The script also runs on its own: generate.sh <changes-dir>
+    Generate,
     /// Build the modified voice pack in build/
     Build,
     /// Upload the built voice pack to the headphones over Bluetooth
@@ -71,6 +82,17 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             let ws = open_workspace(&cli.dir, cli.force)?;
             let count = download(&ws, lang)?;
             eprintln!("saved {count} originals in {}", ws.original.display());
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Command::Generate) => {
+            let ws = open_workspace(&cli.dir, cli.force)?;
+            let generated = generate::generate(&ws, &generate::script(), cli.force)?;
+            eprintln!(
+                "generated {} clips in {}: {}",
+                generated.len(),
+                ws.changes.display(),
+                generated.join(", ")
+            );
             Ok(ExitCode::SUCCESS)
         }
         Some(Command::Build) => {

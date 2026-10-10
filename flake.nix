@@ -23,9 +23,19 @@
             pkgs.makeWrapper
             pkgs.installShellFiles
           ];
+          # The sound script stays a script so users can read and adapt it; `generate` runs this copy.
           postInstall = ''
+            install -Dm755 sounds/generate.sh $out/share/fix-whxm4-voice/generate.sh
             wrapProgram $out/bin/fix-whxm4-voice \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg ]}
+              --prefix PATH : ${
+                pkgs.lib.makeBinPath [
+                  pkgs.ffmpeg
+                  pkgs.bash
+                  pkgs.gawk
+                  pkgs.coreutils
+                ]
+              } \
+              --set-default FIX_WHXM4_VOICE_GENERATE_SCRIPT $out/share/fix-whxm4-voice/generate.sh
           ''
           + pkgs.lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
             installShellCompletion --cmd fix-whxm4-voice \

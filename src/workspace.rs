@@ -3,14 +3,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// The folders a workspace holds.
-pub const FOLDERS: [&str; 3] = ["original", "changes", "build"];
+pub const FOLDERS: [&str; 4] = ["original", "changes", "build", "stock"];
 
 pub struct Workspace {
     pub original: PathBuf,
     pub changes: PathBuf,
     pub build: PathBuf,
-    /// Hidden folder keeping the stock voice pack and manifest, so they are never mistaken for
-    /// originals. Created when they are first saved.
+    /// The stock voice pack and manifest, kept apart from `original/` so they are never mistaken
+    /// for originals.
     pub stock: PathBuf,
 }
 
@@ -24,9 +24,9 @@ impl Workspace {
             original: dir.join(FOLDERS[0]),
             changes: dir.join(FOLDERS[1]),
             build: dir.join(FOLDERS[2]),
-            stock: dir.join(".stock"),
+            stock: dir.join(FOLDERS[3]),
         };
-        let folders = [&ws.original, &ws.changes, &ws.build];
+        let folders = [&ws.original, &ws.changes, &ws.build, &ws.stock];
         if !force && folders.iter().any(|folder| !folder.is_dir()) {
             let others = other_entries(dir)?;
             if !others.is_empty() && !confirm(dir, &others)? {

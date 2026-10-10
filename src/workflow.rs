@@ -3,15 +3,16 @@
 use std::io;
 
 use crate::download::{download_with, downloaded};
-use crate::source::{BaseLanguage, Stock};
+use crate::language::Language;
+use crate::source::Stock;
 use crate::workspace::Workspace;
 
 /// Downloads the originals for `lang` from `fetch`, unless the stock pack and every original are
 /// already present. Returns the number of clips downloaded, or `None` if the download was skipped.
 pub fn prepare(
     ws: &Workspace,
-    lang: BaseLanguage,
-    fetch: impl FnOnce(BaseLanguage) -> io::Result<Stock>,
+    lang: Language,
+    fetch: impl FnOnce(Language) -> io::Result<Stock>,
 ) -> io::Result<Option<usize>> {
     if downloaded(ws) {
         return Ok(None);

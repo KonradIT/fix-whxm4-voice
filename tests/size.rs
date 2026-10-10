@@ -17,7 +17,7 @@ fn ws() -> Workspace {
         original: PathBuf::from("original"),
         changes: PathBuf::from("changes"),
         build: PathBuf::from("build"),
-        stock: PathBuf::from(".stock"),
+        stock: PathBuf::from("stock"),
     }
 }
 

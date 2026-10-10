@@ -60,7 +60,7 @@ pub fn metadata() -> Metadata {
 pub fn unpacked(clips: Vec<Vec<u8>>) -> Unpacked {
     Unpacked {
         metadata: metadata(),
-        image_version: 1,
+        language: 1,
         partition_base: 0x8_0000,
         clips,
     }

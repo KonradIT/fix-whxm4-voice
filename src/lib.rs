@@ -4,6 +4,7 @@ pub mod changes;
 pub mod download;
 pub mod generate;
 pub mod keys;
+pub mod language;
 pub mod manifest;
 pub mod pack;
 pub mod size;

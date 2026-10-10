@@ -7,9 +7,17 @@ with the reasons written down.
 
 **Blocked by:** 10 (Real upload)
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] Ticket 07's findings on language codes are reviewed and the safety argument written down before any attempt
 - [ ] If safe: `upload` uses the custom code by default and falls back to a different real language on request
 - [ ] If safe: verified by hand that the headphones play the pack and what the app then shows
 - [ ] If not safe or not possible: the ticket documents why, and the real-language behaviour from ticket 10 stays
+
+## Comments
+
+- Closed after ticket 07 (ADR 0003). The language is the first u32 of the unpacked image, and the
+  headphones advertise a fixed list of 15 languages. The app maps unknown codes to "undefined".
+  How the firmware treats an unknown code cannot be seen without risking the device. The user chose
+  German as the default install language instead, with `--install-lang` for others and English
+  refused.

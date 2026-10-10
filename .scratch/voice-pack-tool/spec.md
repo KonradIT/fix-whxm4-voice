@@ -20,9 +20,9 @@ A Rust command-line tool, `fix-whxm4-voice`, run from a dedicated **workspace** 
 2. The user drops **changes** into `changes/`, each named starting with the slot number of the
    original it replaces. Any audio format works. An empty file means silence.
 3. The tool builds a modified voice pack in `build/`, checks it fits, and verifies it by unpacking it again.
-4. The tool **uploads** the pack from the PC straight to the headphones over Bluetooth LE, by
-   replaying the update procedure the Sony app uses. The phone app is not involved. Ideally the pack
-   is installed under a dedicated "custom" **install language**.
+4. The tool **uploads** the pack from the PC straight to the headphones over Bluetooth Classic, by
+   replaying the update procedure the Sony app uses. The phone app is not involved. The pack is
+   installed as an **install language** (German by default), whose prompts it then replaces.
 
 Running the tool with no subcommand walks through the whole workflow. Each step is also its own subcommand.
 
@@ -106,6 +106,12 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
     every checksum, read the slot table, read every clip), so that a broken pack never reaches the
     headphones.
 33. As a user, I want the last built pack kept in `build/`, so that a failed upload can be investigated.
+33a. As a user, I want the pack built as German by default, so that it replaces a language other than
+     the English built into the headphones without me picking one.
+33b. As a user, I want `--install-lang <name>` to choose another install language, so that I can
+     keep German for Sony's prompts.
+33c. As a user, I want `--install-lang english` refused with an explanation, because the headphones
+     always play their built-in English, so that I don't upload a pack that is never played.
 
 ### Device and upload
 
@@ -120,8 +126,8 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
     require a typed confirmation before writing, so that I always know what is about to happen.
 38. As a user, I want `upload --dry-run` to go through every step except erasing and writing, so
     that I can test the connection and procedure without risk.
-39. As a user, I want the tool to refuse any erase or write outside the voice partition, so that a
-    bug in the tool can never overwrite firmware.
+39. As a user, I want the tool to refuse any erase or write outside the FOTA partition the headphones
+    report, or beyond the pack's size, so that a bug in the tool can never overwrite firmware.
 40. As a user, I want the upload to send only the steps the Sony app itself sends, in the same
     order, so that the headphones receive a procedure they were designed for.
 41. As a user, I want progress shown during the upload, so that I know it hasn't stalled.
@@ -130,10 +136,9 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
 43. As a user, I want a clear message if the headphones reject the pack (for example at the 99%
     checksum check), so that I know it failed and that the old voice pack can be restored by picking
     a stock language in the Sony app.
-44. As a user, I want the pack installed under a dedicated "custom" install language that the app
-    later shows as custom, so that I can tell my pack apart from Sony's.
-45. As a user, if a custom install language isn't possible, I want the pack installed under a real
-    language other than the active one, so that the headphones actually switch to it.
+44. (Dropped: a dedicated "custom" install language. See ADR 0003.)
+45. As a user, I want to be told when the install language is already the active one, so that I
+    know the headphones may ignore the pack (the same-language check is not understood).
 
 ### Packaging
 
@@ -147,11 +152,9 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
 
 - **Stage 1**: workspace handling, `download`, `build`, the default workflow, the flake. No device needed.
 - **Stage 2**: reverse engineering of the upload procedure, then `device-info`, then `upload`.
-- Stage 2's sources are a decompile of the Android Sound Connect APK (supplied by the user, never
+- Stage 2's sources are a decompile of the Android Sound Connect APK (12.4.2 from APKPure, never
   executed), cross-checked against race-toolkit's preliminary firmware update code. No phone capture
-  is possible (iPhone, no Mac).
-- Fallback, only if the reverse engineering fails: the proven route through the app and a proxy, as
-  `upload --via-app`. Not part of this spec. See ADR 0001.
+  is possible (iPhone, no Mac). The findings are in `docs/upload-protocol.md`.
 
 ### Modules
 
@@ -164,9 +167,10 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
     (algorithm, SHA-256 of the unpacked image);
   - the body at 0x1000: AES-128-CBC with a fixed key and IV, padded with 0xFF to 16 bytes, over a
     13-byte LZMA1 header plus raw LZMA1 stream (lc=3, lp=0, pb=2, dictionary 16 KiB);
-  - the unpacked image: u32 version, u32 slot count (54), a table of 54 × (u32 size, u32 absolute
-    offset) based on the voice partition (base = first offset − table end), then the clips back to
-    back, zero-padded to exactly 1 MiB.
+  - the unpacked image: u32 language code, u32 slot count (54), a table of 54 × (u32 size, u32
+    absolute offset) (base = first offset − table end), then the clips back to back, zero-padded to
+    exactly 1 MiB. Every stock pack but English has base 0x380000; English points at the English
+    built into the headphones (0x80000).
   
   Keys are built in, as published constants kept together in one place.
 - **Manifest codec** (pure). It reads Sony's manifest: header lines `eaid`, `daid`, `digest`, a
@@ -184,28 +188,30 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
   clip total of the base language, kept in one place so it can later be replaced by a hardcoded
   constant. Produces the per-file report and asks for the changes to be trimmed.
 - **Pack source** (HTTP). Fetches the manifest and pack for a language from Sony's public update
-  server (`info.update.sony.net/HP002/VGIDLPB04XX/…`, XX = language number 01–10).
-- **Device link** (Bluetooth LE through BlueZ, using the `bluer` crate). It connects to the update
-  channel. The GATT service and characteristic UUIDs are taken from existing research and confirmed
-  during stage 2. The interface is "send command, await reply" so it can be faked.
-- **Upload procedure** (protocol logic over the device link). It replays the app's update sequence
-  (query state, start, erase, write in 4 KB chunks skipping all-0xFF 256-byte pages, integrity
-  check, commit). A range guard sits below it and rejects any erase or write outside the voice
-  partition before it is sent. Dry-run mode suppresses erase and write.
+  server (`info.update.sony.net/HP002/VGIDLPB04XX/…`, XX = the language code in hex).
+- **Language** (pure data). The ten languages with Sony's language codes, used as both base and
+  install language.
+- **Device link** (Bluetooth Classic RFCOMM through BlueZ). Two channels, found by SDP UUID: Sony's
+  MDR control channel (`Serial HPC`) and the Airoha RACE channel (`Airoha_APP`). The interface is
+  "send command, await reply" so it can be faked.
+- **Upload procedure** (protocol logic over the device link). It replays the app's sequence from
+  `docs/upload-protocol.md`: MDR "language update mode" on, RACE FOTA start and queries, erase in
+  4 KB blocks, program 256-byte pages skipping all-0xFF pages, integrity check, commit, update mode
+  off. A range guard sits below it and rejects any erase or write outside the FOTA partition the
+  headphones report, or beyond the pack, before it is sent. Dry-run mode suppresses erase and write.
 - **Workspace** (filesystem). Resolves the directory (`-d`, default the current directory), creates
   it if missing, and creates `original/`, `changes/`, `build/`. It runs the "not dedicated" check
   only while creating those, ignores hidden entries, and honours `-f`.
 - **CLI**: subcommands `download [--lang]`, `build`, `upload [--dry-run]`, `device-info`. The
-  default command runs the workflow. Global flags: `-d`, `-f`.
+  default command runs the workflow. Global flags: `-d`, `-f`, `--lang`, `--install-lang`.
 
 ### Behaviour decisions
 
 - `build` output in `build/` includes the pack and is kept after uploading.
 - `upload` rebuilds when anything in `original/` or `changes/` is newer than the last build.
-- The install language is decided in stage 2, once it is known how the app tells the headphones the
-  language. Order of preference:
-  1. a dedicated "custom" code, but only if it is shown safe on the device side;
-  2. a real language other than the active one, read from the headphones if possible, otherwise asked for.
+- The install language is part of the pack: `build` writes its code into the unpacked image and
+  lays the slot table out like that language's stock pack. German by default, English refused
+  (ADR 0003).
 - The headphones ignore a pack installed under the language that is already active. The cause is
   unknown and the check sits inside the headphones.
 
@@ -225,16 +231,18 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
   every checksum is valid. Tampering with any checksummed region is detected. An image over the
   limit is rejected. The padding and size rules hold.
 - **Upload procedure**: tested against a fake device link that implements the reply sequence learned
-  in stage 2 and records every command. Erases and writes stay within the voice partition, and an
-  out-of-range request is refused before anything is sent. Dry-run sends no erase or write. Success
+  in stage 2 and records every command. Erases and writes stay within the reported FOTA partition
+  and the pack, and an out-of-range request is refused before anything is sent. Dry-run sends no erase or write. Success
   is reported only after the fake device's checksum check passes, and failure when it fails.
 - Real stock packs are covered at runtime, not in tests: `build` always verifies its output by unpacking it again.
 - Prior art: none. This is a new codebase.
 
 ## Out of Scope
 
-- The upload route through the app and a proxy (fallback only, see ADR 0001).
-- Any write outside the voice partition, any firmware update, and any device or model other than the WH-1000XM4.
+- The upload route through the app and a proxy.
+- Any write outside the reported FOTA partition, any firmware update, and any device or model other than the
+  WH-1000XM4.
+- A "custom" install language (ADR 0003).
 - Android or iOS app patching, and certificate installation.
 - Automatically shrinking clips that don't fit, and suggesting commands for it. The user trims the changes.
 - A hardcoded size limit. That comes later; for now the limit is the base language's stock total.
@@ -243,17 +251,14 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
 ## Further Notes
 
 - Domain terms follow `CONTEXT.md`. The upload approach and its safety limits are in
-  `docs/adr/0001-direct-bluetooth-upload.md`.
+  `docs/adr/0001-direct-bluetooth-upload.md`, the install language in ADR 0003, and the protocol in
+  `docs/upload-protocol.md`.
 - `info.md` contains format notes and links to existing implementations. It is reference material, not a spec.
 - Reference implementations: SantiMoncada/sony-xm4-voice-mod (no license; read only for
-  understanding, don't copy code) and HelgeSverre/sony-vp-extract (MIT). race-toolkit's license
-  still needs checking before anything is borrowed from it.
-- Open questions for stage 2:
-  - the exact erase, write, start, commit and reboot commands and their framing;
-  - the reply sequence;
-  - whether the voice partition needs encrypted writes;
-  - the voice partition's exact range;
-  - how the install language is conveyed, and whether "custom" is possible;
-  - the second, unexplained check that ignores a pack installed under the already-active language.
+  understanding, don't copy code) and HelgeSverre/sony-vp-extract (MIT). race-toolkit has no
+  license either: protocol facts only, no code.
+- Still open after stage 2's research: the voice partition's exact range (RACE flash reads are
+  refused on this firmware), the FOTA partition's address (only reported in update mode), and the
+  same-language check.
 - Recovery if a voice-pack upload goes wrong while the firmware is intact: pick a stock language in
   the Sony app, which rewrites the voice partition.

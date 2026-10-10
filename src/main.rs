@@ -7,7 +7,8 @@ use clap_complete::Shell;
 use fix_whxm4_voice::build::build;
 use fix_whxm4_voice::download::download;
 use fix_whxm4_voice::generate;
-use fix_whxm4_voice::source::{self, BaseLanguage};
+use fix_whxm4_voice::language::Language;
+use fix_whxm4_voice::source;
 use fix_whxm4_voice::workflow;
 use fix_whxm4_voice::workspace::Workspace;
 
@@ -25,8 +26,13 @@ struct Cli {
     force: bool,
 
     /// Base language to download the originals in
-    #[arg(long, global = true, value_enum, default_value_t = BaseLanguage::English)]
-    lang: BaseLanguage,
+    #[arg(long, global = true, value_enum, default_value_t = Language::English)]
+    lang: Language,
+
+    /// Language the headphones install the voice pack as, replacing that language's prompts.
+    /// English cannot be replaced: the headphones always play their built-in English
+    #[arg(long, global = true, value_enum, default_value_t = Language::German)]
+    install_lang: Language,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -111,8 +117,12 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
         }
         Some(Command::Build) => {
             let ws = open_workspace(&cli.dir, cli.force)?;
-            let path = build(&ws)?;
-            eprintln!("built and verified {}", path.display());
+            let path = build(&ws, cli.install_lang)?;
+            eprintln!(
+                "built and verified {}, to install as {}",
+                path.display(),
+                cli.install_lang.name()
+            );
             Ok(ExitCode::SUCCESS)
         }
         Some(Command::Upload { dry_run: _ }) => {
@@ -147,7 +157,7 @@ fn confirm_not_dedicated(dir: &Path, others: &[String]) -> io::Result<bool> {
     }
     writeln!(
         stderr,
-        "This tool should run in its own directory. It will create original/, changes/ and build/ here."
+        "This tool should run in its own directory. It will create original/, changes/, build/ and stock/ here."
     )?;
     write!(stderr, "Continue anyway? [y/N] ")?;
     stderr.flush()?;

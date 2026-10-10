@@ -8,17 +8,24 @@ use common::{TempDir, clips, unpacked};
 use fix_whxm4_voice::audio::Convert;
 use fix_whxm4_voice::build::{BUILT_PACK, build, build_with};
 use fix_whxm4_voice::download::STOCK_PACK;
-use fix_whxm4_voice::pack::{pack, unpack};
+use fix_whxm4_voice::language::Language;
+use fix_whxm4_voice::pack::{INSTALLED_BASE, Unpacked, pack, unpack};
 use fix_whxm4_voice::slots::clip_file_name;
 use fix_whxm4_voice::workspace::Workspace;
 
-/// A workspace the way `download` leaves it: the stock pack in `.stock/`, its clips in `original/`.
+/// A workspace the way `download` leaves it for the English stock pack: the stock pack in
+/// `stock/`, its clips in `original/`.
 fn downloaded(tmp: &TempDir) -> Workspace {
+    downloaded_from(tmp, unpacked(clips()))
+}
+
+/// A workspace the way `download` leaves it for `stock`.
+fn downloaded_from(tmp: &TempDir, stock: Unpacked) -> Workspace {
     let ws = Workspace::open(tmp.path(), true, |_, _| unreachable!())
         .unwrap()
         .unwrap();
     fs::create_dir_all(&ws.stock).unwrap();
-    fs::write(ws.stock.join(STOCK_PACK), pack(&unpacked(clips())).unwrap()).unwrap();
+    fs::write(ws.stock.join(STOCK_PACK), pack(&stock).unwrap()).unwrap();
     for (slot, clip) in clips().iter().enumerate() {
         fs::write(ws.original.join(clip_file_name(slot)), clip).unwrap();
     }
@@ -42,12 +49,12 @@ impl Convert for FakeConvert {
 }
 
 fn built_clips(ws: &Workspace) -> Vec<Vec<u8>> {
-    let path = build_with(ws, &FakeConvert).unwrap();
+    let path = build_with(ws, Language::German, &FakeConvert).unwrap();
     unpack(&fs::read(path).unwrap()).unwrap().clips
 }
 
 fn error(ws: &Workspace) -> String {
-    match build_with(ws, &FakeConvert) {
+    match build_with(ws, Language::German, &FakeConvert) {
         Ok(_) => panic!("build succeeded"),
         Err(e) => e.to_string(),
     }
@@ -58,18 +65,50 @@ fn builds_the_originals_into_a_pack_in_build() {
     let tmp = TempDir::new();
     let ws = downloaded(&tmp);
 
-    let path = build(&ws).unwrap();
+    let path = build(&ws, Language::German).unwrap();
 
     assert_eq!(path, ws.build.join(BUILT_PACK));
     assert_eq!(unpack(&fs::read(&path).unwrap()).unwrap().clips, clips());
 }
 
 #[test]
-fn the_unchanged_image_matches_the_stock_image() {
+fn the_pack_is_built_as_the_install_language_at_the_installed_base() {
     let tmp = TempDir::new();
     let ws = downloaded(&tmp);
 
-    let built = unpack(&fs::read(build(&ws).unwrap()).unwrap()).unwrap();
+    let built = unpack(&fs::read(build(&ws, Language::Swedish).unwrap()).unwrap()).unwrap();
+
+    assert_eq!(built.language, Language::Swedish.code());
+    assert_eq!(built.partition_base, INSTALLED_BASE);
+    assert_eq!(built.clips, clips());
+}
+
+#[test]
+fn english_as_install_language_is_refused() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+
+    let error = match build_with(&ws, Language::English, &FakeConvert) {
+        Ok(_) => panic!("build succeeded"),
+        Err(e) => e.to_string(),
+    };
+
+    assert!(error.contains("built into the headphones"), "{error}");
+    assert!(error.contains("--install-lang"), "{error}");
+    assert!(!ws.build.join(BUILT_PACK).exists());
+}
+
+#[test]
+fn the_unchanged_image_matches_the_stock_image_of_the_install_language() {
+    let tmp = TempDir::new();
+    let german = Unpacked {
+        language: Language::German.code(),
+        partition_base: INSTALLED_BASE,
+        ..unpacked(clips())
+    };
+    let ws = downloaded_from(&tmp, german);
+
+    let built = unpack(&fs::read(build(&ws, Language::German).unwrap()).unwrap()).unwrap();
     let stock = unpack(&fs::read(ws.stock.join(STOCK_PACK)).unwrap()).unwrap();
 
     assert_eq!(built.metadata.image_sha256, stock.metadata.image_sha256);

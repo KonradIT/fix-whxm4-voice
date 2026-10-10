@@ -9,9 +9,10 @@
 //!   - 0x0014: hash algorithm (u32), SHA-256 of the unpacked image.
 //! - 0x1000: body, AES-128-CBC over a 13-byte LZMA1 header and raw LZMA1 stream, padded with 0xFF.
 //!
-//! The unpacked image is a u32 version, a u32 slot count, a table of (u32 size, u32 offset) per
-//! slot, then the clips back to back, zero-padded to 1 MiB. Offsets are absolute in the voice
-//! partition; the partition base is the first offset minus the end of the table.
+//! The unpacked image is a u32 language code, a u32 slot count, a table of (u32 size, u32 offset)
+//! per slot, then the clips back to back, zero-padded to 1 MiB. Offsets are absolute; the
+//! partition base is the first offset minus the end of the table. Every stock pack but English has
+//! the base [`INSTALLED_BASE`]; English points at the English built into the headphones instead.
 
 use std::io::{self, Read, Write};
 
@@ -31,6 +32,8 @@ const METADATA_OFFSET: usize = 0x100;
 const BODY_OFFSET: usize = 0x1000;
 /// Size of the unpacked image.
 pub const IMAGE_SIZE: usize = 0x10_0000;
+/// Partition base of every stock pack except English: where the headphones keep an installed pack.
+pub const INSTALLED_BASE: u32 = 0x38_0000;
 /// Size of the slot table at the start of the unpacked image.
 const TABLE_SIZE: usize = 8 + 8 * SLOT_COUNT;
 /// Compression type of an LZMA1 body.
@@ -47,9 +50,10 @@ const TAG_END: u16 = 0xFFFF;
 /// A voice pack taken apart.
 pub struct Unpacked {
     pub metadata: Metadata,
-    /// Version field at the start of the unpacked image.
-    pub image_version: u32,
-    /// Address of the unpacked image in the voice partition.
+    /// Language code at the start of the unpacked image: the language the headphones install the
+    /// pack as.
+    pub language: u32,
+    /// Address the slot offsets count from.
     pub partition_base: u32,
     /// The clip of every slot, by slot number.
     pub clips: Vec<Vec<u8>>,
@@ -120,17 +124,17 @@ pub fn unpack(pack: &[u8]) -> io::Result<Unpacked> {
             "unpacked image does not match the SHA-256 in the metadata",
         ));
     }
-    let (image_version, partition_base, clips) = read_image(&image)?;
+    let (language, partition_base, clips) = read_image(&image)?;
 
     Ok(Unpacked {
         metadata,
-        image_version,
+        language,
         partition_base,
         clips,
     })
 }
 
-/// Puts a voice pack together from the clips, image version and partition base in `unpacked`,
+/// Puts a voice pack together from the clips, language and partition base in `unpacked`,
 /// the inverse of [`unpack`]. Of the metadata, only the fields stock packs leave unexplained or
 /// constant carry over; the compression type, offsets, sizes and the image SHA-256 are written
 /// anew, and the outer SHA-256 is computed last.
@@ -192,7 +196,7 @@ fn write_metadata(metadata: &Metadata, block: &mut [u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// The unpacked image: version, slot count, slot table, the clips back to back, zero padding.
+/// The unpacked image: language code, slot count, slot table, the clips back to back, zero padding.
 fn write_image(unpacked: &Unpacked) -> io::Result<Vec<u8>> {
     let clips = &unpacked.clips;
     if clips.len() != SLOT_COUNT {
@@ -210,7 +214,7 @@ fn write_image(unpacked: &Unpacked) -> io::Result<Vec<u8>> {
     }
 
     let mut image = Vec::with_capacity(IMAGE_SIZE);
-    image.extend(unpacked.image_version.to_le_bytes());
+    image.extend(unpacked.language.to_le_bytes());
     image.extend((SLOT_COUNT as u32).to_le_bytes());
     let mut offset = unpacked.partition_base as usize + TABLE_SIZE;
     for clip in clips {
@@ -326,7 +330,7 @@ fn compress(image: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 fn read_image(image: &[u8]) -> io::Result<(u32, u32, Vec<Vec<u8>>)> {
-    let version = u32_at(image, 0);
+    let language = u32_at(image, 0);
     let count = u32_at(image, 4) as usize;
     if count != SLOT_COUNT {
         return Err(invalid(format!(
@@ -351,7 +355,7 @@ fn read_image(image: &[u8]) -> io::Result<(u32, u32, Vec<Vec<u8>>)> {
             .ok_or_else(|| invalid(format!("slot {slot} lies outside the unpacked image")))?;
         clips.push(clip.to_vec());
     }
-    Ok((version, base, clips))
+    Ok((language, base, clips))
 }
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {

@@ -42,7 +42,7 @@ fn a_packed_pack_unpacks_to_the_same_clips() {
     let unpacked = unpack(&pack(&unpacked(clips.clone())).unwrap()).unwrap();
 
     assert_eq!(unpacked.clips, clips);
-    assert_eq!(unpacked.image_version, 1);
+    assert_eq!(unpacked.language, 1);
     assert_eq!(unpacked.partition_base, 0x8_0000);
 }
 

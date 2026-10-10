@@ -6,9 +6,10 @@ use std::process::{Command, Output};
 
 use common::{TempDir, clips, unpacked};
 use fix_whxm4_voice::download::STOCK_PACK;
+use fix_whxm4_voice::language::Language;
 use fix_whxm4_voice::pack::pack;
 use fix_whxm4_voice::slots::{SLOT_COUNT, clip_file_name};
-use fix_whxm4_voice::source::{BaseLanguage, Stock};
+use fix_whxm4_voice::source::Stock;
 use fix_whxm4_voice::workflow::{next_steps, prepare};
 use fix_whxm4_voice::workspace::Workspace;
 
@@ -19,14 +20,14 @@ fn workspace(tmp: &TempDir) -> Workspace {
 }
 
 /// Stands in for Sony's update server.
-fn fetch(_: BaseLanguage) -> io::Result<Stock> {
+fn fetch(_: Language) -> io::Result<Stock> {
     Ok(Stock {
         manifest: b"manifest".to_vec(),
         pack: pack(&unpacked(clips())).unwrap(),
     })
 }
 
-fn never_fetched(_: BaseLanguage) -> io::Result<Stock> {
+fn never_fetched(_: Language) -> io::Result<Stock> {
     panic!("downloaded again")
 }
 
@@ -35,7 +36,7 @@ fn first_run_downloads_the_originals() {
     let tmp = TempDir::new();
     let ws = workspace(&tmp);
 
-    let downloaded = prepare(&ws, BaseLanguage::English, fetch).unwrap();
+    let downloaded = prepare(&ws, Language::English, fetch).unwrap();
 
     assert_eq!(downloaded, Some(SLOT_COUNT));
     assert!(ws.stock.join(STOCK_PACK).is_file());
@@ -51,9 +52,9 @@ fn first_run_downloads_the_originals() {
 fn rerun_skips_the_download() {
     let tmp = TempDir::new();
     let ws = workspace(&tmp);
-    prepare(&ws, BaseLanguage::English, fetch).unwrap();
+    prepare(&ws, Language::English, fetch).unwrap();
 
-    let downloaded = prepare(&ws, BaseLanguage::English, never_fetched).unwrap();
+    let downloaded = prepare(&ws, Language::English, never_fetched).unwrap();
 
     assert_eq!(downloaded, None);
 }
@@ -62,10 +63,10 @@ fn rerun_skips_the_download() {
 fn a_missing_original_is_downloaded_again() {
     let tmp = TempDir::new();
     let ws = workspace(&tmp);
-    prepare(&ws, BaseLanguage::English, fetch).unwrap();
+    prepare(&ws, Language::English, fetch).unwrap();
     fs::remove_file(ws.original.join(clip_file_name(7))).unwrap();
 
-    let downloaded = prepare(&ws, BaseLanguage::English, fetch).unwrap();
+    let downloaded = prepare(&ws, Language::English, fetch).unwrap();
 
     assert_eq!(downloaded, Some(SLOT_COUNT));
     assert!(ws.original.join(clip_file_name(7)).is_file());
@@ -75,10 +76,10 @@ fn a_missing_original_is_downloaded_again() {
 fn a_missing_stock_pack_is_downloaded_again() {
     let tmp = TempDir::new();
     let ws = workspace(&tmp);
-    prepare(&ws, BaseLanguage::English, fetch).unwrap();
+    prepare(&ws, Language::English, fetch).unwrap();
     fs::remove_file(ws.stock.join(STOCK_PACK)).unwrap();
 
-    let downloaded = prepare(&ws, BaseLanguage::English, fetch).unwrap();
+    let downloaded = prepare(&ws, Language::English, fetch).unwrap();
 
     assert_eq!(downloaded, Some(SLOT_COUNT));
     assert!(ws.stock.join(STOCK_PACK).is_file());
@@ -112,7 +113,7 @@ fn default_command_with_originals_present_prints_next_steps() {
     let ws = Workspace::open(&dir, true, |_, _| unreachable!())
         .unwrap()
         .unwrap();
-    prepare(&ws, BaseLanguage::English, fetch).unwrap();
+    prepare(&ws, Language::English, fetch).unwrap();
 
     let out = run(&["-d", dir.to_str().unwrap(), "-f", "--lang", "german"]);
 

@@ -4,10 +4,14 @@ use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
+use fix_whxm4_voice::bluetooth::{self, Headphones};
 use fix_whxm4_voice::build::build;
+use fix_whxm4_voice::device_info;
 use fix_whxm4_voice::download::download;
 use fix_whxm4_voice::generate;
 use fix_whxm4_voice::language::Language;
+use fix_whxm4_voice::mdr::MdrLink;
+use fix_whxm4_voice::race::RaceLink;
 use fix_whxm4_voice::source;
 use fix_whxm4_voice::workflow;
 use fix_whxm4_voice::workspace::Workspace;
@@ -59,8 +63,12 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Show what the headphones report about themselves
-    DeviceInfo,
+    /// Show what the headphones report about themselves, sending read-only queries only
+    DeviceInfo {
+        /// Log every command and reply as raw bytes
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Print a shell completion script to stdout
     Completions {
         /// Shell to print the script for
@@ -129,7 +137,14 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             open_workspace(&cli.dir, cli.force)?;
             not_implemented("upload")
         }
-        Some(Command::DeviceInfo) => not_implemented("device-info"),
+        Some(Command::DeviceInfo { verbose }) => {
+            let headphones = Headphones::find()?;
+            eprintln!("found {} ({})", headphones.name, headphones.address);
+            let mut mdr = MdrLink::new(headphones.open(bluetooth::MDR_UUID, "MDR", verbose)?);
+            let mut race = RaceLink::new(headphones.open(bluetooth::RACE_UUID, "RACE", verbose)?);
+            println!("{}", device_info::read(&mut mdr, &mut race)?);
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Command::Completions { shell }) => {
             let mut cmd = Cli::command();
             let name = cmd.get_name().to_string();

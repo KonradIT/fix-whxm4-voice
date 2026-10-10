@@ -15,6 +15,8 @@ Findings from ticket 07. The headphones were never written to. Contact with them
 - **race-toolkit**, <https://github.com/auracast-research/race-toolkit>, commit
   `eec737d3cef3f6155c513c05eddadb07ee8e9197` (2026-01-15), mainly `librace/{fota,packets,constants,util}.py`.
 - **The user's headphones**: name, UUIDs and SDP records only.
+- **Gadgetbridge**, <https://codeberg.org/Freeyourgadget/Gadgetbridge>, for the MDR device-info query only
+  (model name and firmware version), which the APK notes do not cover. Protocol facts only.
 - **All ten stock packs** (`VGIDLPB0401`–`VGIDLPB0410`), downloaded with this tool and unpacked to compare
   their headers.
 
@@ -257,6 +259,24 @@ The last reply is how the app learns the category ID (`HP002`) and each language
 | 0x08 | Swedish              | 0xF0 | Chinese             |
 
 The `xx` in `VGIDLPB04xx` is this code in hex. Turkish is `0x10`, and so `VGIDLPB0410`.
+
+Read-only MDR queries on data type `DATA_MDR` (`0x0C`). These are not taken from the APK but from
+the MDR v1 device-info query as Gadgetbridge sends it (`CONNECT_GET_DEVICE_INFO`). Ticket 08 confirmed
+them on the user's unit:
+
+| Request | Meaning | Reply |
+|---|---|---|
+| `00 00` | protocol info | `01 00 70 00` |
+| `04 01` | model name | `05 01 <len>` + ASCII, `WH-1000XM4` |
+| `04 02` | firmware version | `05 02 <len>` + ASCII, `3.0.1` |
+
+**Sequence numbers.** Each side acknowledges every data frame with an ACK whose seq is `1 − seq` of
+that frame. The sender's next command uses the seq of the last ACK it received. The headphones
+follow this rule (see the log in ticket 08).
+
+`device-info` sends exactly these MDR queries: protocol info, model name, firmware version,
+voice-guidance capability (`40 01`), update-mode status, current language, and server and languages.
+Its only RACE command is the `0x0A00` chip-name read.
 
 ## The install language
 

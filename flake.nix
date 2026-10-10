@@ -22,7 +22,10 @@
           nativeBuildInputs = [
             pkgs.makeWrapper
             pkgs.installShellFiles
+            pkgs.pkg-config
           ];
+          # bluer talks to BlueZ over D-Bus.
+          buildInputs = [ pkgs.dbus ];
           # The sound script stays a script so users can read and adapt it; `generate` runs this copy.
           postInstall = ''
             install -Dm755 sounds/generate.sh $out/share/fix-whxm4-voice/generate.sh
@@ -56,6 +59,8 @@
             pkgs.clippy
             pkgs.rust-analyzer
             pkgs.ffmpeg
+            pkgs.pkg-config
+            pkgs.dbus
           ];
           RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };

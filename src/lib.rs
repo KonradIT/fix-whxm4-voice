@@ -1,12 +1,17 @@
 pub mod audio;
+pub mod bluetooth;
 pub mod build;
 pub mod changes;
+pub mod device_info;
 pub mod download;
 pub mod generate;
 pub mod keys;
 pub mod language;
+pub mod link;
 pub mod manifest;
+pub mod mdr;
 pub mod pack;
+pub mod race;
 pub mod size;
 pub mod slots;
 pub mod source;

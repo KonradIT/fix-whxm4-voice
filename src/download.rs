@@ -3,6 +3,7 @@
 use std::fs;
 use std::io;
 
+use crate::invalid;
 use crate::language::Language;
 use crate::pack;
 use crate::slots::{SLOT_COUNT, clip_file_name};
@@ -24,6 +25,25 @@ pub fn download(ws: &Workspace, lang: Language) -> io::Result<usize> {
 pub fn downloaded(ws: &Workspace) -> bool {
     ws.stock.join(STOCK_PACK).is_file()
         && (0..SLOT_COUNT).all(|slot| ws.original.join(clip_file_name(slot)).is_file())
+}
+
+/// The base language: the language of the stock voice pack the originals came from, or `None` if
+/// they are not all downloaded, as [`downloaded`] checks.
+pub fn base_language(ws: &Workspace) -> io::Result<Option<Language>> {
+    if !downloaded(ws) {
+        return Ok(None);
+    }
+    let path = ws.stock.join(STOCK_PACK);
+    let unpacked = pack::unpack(&fs::read(&path)?)?;
+    Language::from_code(unpacked.language)
+        .map(Some)
+        .ok_or_else(|| {
+            invalid(format!(
+                "{} is in language {:#x}, which Sony publishes no voice pack for",
+                path.display(),
+                unpacked.language
+            ))
+        })
 }
 
 /// Like [`download`], getting the stock manifest and voice pack from `fetch`.

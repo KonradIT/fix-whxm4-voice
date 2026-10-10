@@ -546,24 +546,14 @@ fn a_rejected_pack_never_reaches_full_progress_and_explains_how_to_restore_stock
 }
 
 #[test]
-fn the_plan_warns_when_the_install_language_is_already_active() {
+fn the_plan_does_not_warn_when_the_install_language_is_already_active() {
     let mut device = Device::new(0xFF);
     device.language = 0x03;
 
     let (result, _) = upload(device, Mode::DryRun);
 
     let plan = result.unwrap();
-    assert!(plan.install_language_active());
-    assert!(plan.to_string().contains("may ignore"), "{plan}");
-}
-
-#[test]
-fn the_plan_does_not_warn_when_another_language_is_active() {
-    let (result, _) = upload(Device::new(0xFF), Mode::DryRun);
-
-    let plan = result.unwrap();
-    assert!(!plan.install_language_active());
-    assert!(!plan.to_string().contains("may ignore"), "{plan}");
+    assert!(!plan.to_string().contains("warning"), "{plan}");
 }
 
 #[test]

@@ -87,12 +87,6 @@ const RESTORE: &str = "if the headphones' voice prompts are wrong or missing aft
      stock language in the Sony app installs a stock voice pack again";
 
 impl Plan {
-    /// Whether the headphones already play the language the pack installs as. They may then ignore
-    /// the pack.
-    pub fn install_language_active(&self) -> bool {
-        self.active as u32 == self.install.code()
-    }
-
     /// Whether the headphones hold this pack, checked and waiting to be installed, so that only the
     /// commit is left to send, as the app does in that state.
     pub fn commit_only(&self) -> bool {
@@ -516,14 +510,6 @@ impl fmt::Display for Plan {
                 f,
                 "warning:          English is built into the headphones, which probably keep playing the \
                  built-in English instead of this pack"
-            )?;
-        }
-        if self.install_language_active() {
-            writeln!(
-                f,
-                "warning:          the headphones already play {}, and may ignore a pack in the language \
-                 they play; build it as another language with --install-lang",
-                language_name(self.install.code() as u8)
             )?;
         }
         let count = |action| self.blocks.iter().filter(|b| b.action == action).count();

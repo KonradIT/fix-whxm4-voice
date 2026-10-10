@@ -26,9 +26,12 @@
           ];
           # bluer talks to BlueZ over D-Bus.
           buildInputs = [ pkgs.dbus ];
-          # The sound script stays a script so users can read and adapt it; `generate` runs this copy.
+          # The audio tests convert clips with ffmpeg, as the tool does.
+          nativeCheckInputs = [ pkgs.ffmpeg ];
+          # The sound scripts stay scripts so users can read and adapt them; `generate` runs these copies.
           postInstall = ''
             install -Dm755 sounds/generate.sh $out/share/fix-whxm4-voice/generate.sh
+            install -Dm755 sounds/battery.sh $out/share/fix-whxm4-voice/battery.sh
             wrapProgram $out/bin/fix-whxm4-voice \
               --prefix PATH : ${
                 pkgs.lib.makeBinPath [
@@ -38,7 +41,8 @@
                   pkgs.coreutils
                 ]
               } \
-              --set-default FIX_WHXM4_VOICE_GENERATE_SCRIPT $out/share/fix-whxm4-voice/generate.sh
+              --set-default FIX_WHXM4_VOICE_GENERATE_SCRIPT $out/share/fix-whxm4-voice/generate.sh \
+              --set-default FIX_WHXM4_VOICE_BATTERY_SCRIPT $out/share/fix-whxm4-voice/battery.sh
           ''
           + pkgs.lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
             installShellCompletion --cmd fix-whxm4-voice \

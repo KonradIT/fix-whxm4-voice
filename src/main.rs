@@ -7,8 +7,8 @@ use clap_complete::Shell;
 use fix_whxm4_voice::bluetooth::{self, Headphones};
 use fix_whxm4_voice::build::{self, BUILT_PACK, BuiltPack, build};
 use fix_whxm4_voice::device_info;
-use fix_whxm4_voice::download::download;
-use fix_whxm4_voice::generate;
+use fix_whxm4_voice::download::{self, download};
+use fix_whxm4_voice::generate::{self, Script};
 use fix_whxm4_voice::language::Language;
 use fix_whxm4_voice::mdr::MdrLink;
 use fix_whxm4_voice::race::RaceLink;
@@ -57,7 +57,21 @@ enum Command {
     ///
     /// The clips come from a bash script using ffmpeg, sounds/generate.sh in the project's
     /// repository on GitHub. The script also runs on its own: generate.sh <changes-dir>
-    Generate,
+    ///
+    /// It also offers to shorten the battery prompts: of "battery, about seventy percent" only
+    /// "seventy" is kept, of "battery, fully charged" only "full". These clips are cut from the
+    /// English originals by sounds/battery.sh, which also runs on its own: battery.sh <changes-dir>
+    /// <original-dir>. Without originals, it offers to download the English ones first. With
+    /// originals in another language it says so and skips them.
+    Generate {
+        /// Also extract the battery clips, without asking. Downloads the English originals if there
+        /// are none yet
+        #[arg(long, conflicts_with = "no_battery")]
+        battery: bool,
+        /// Generate the tones only, without asking about the battery clips
+        #[arg(long)]
+        no_battery: bool,
+    },
     /// Build the modified voice pack in build/
     Build,
     /// Upload the built voice pack to the headphones over Bluetooth
@@ -140,9 +154,21 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             eprintln!("saved {count} originals in {}", ws.original.display());
             Ok(ExitCode::SUCCESS)
         }
-        Some(Command::Generate) => {
+        Some(Command::Generate {
+            battery,
+            no_battery,
+        }) => {
             let ws = open_workspace(&cli.dir, cli.force)?;
-            let generated = generate::generate(&ws, &generate::script(), cli.force)?;
+            let flag = match (battery, no_battery) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            };
+            let mut scripts = vec![Script::sounds()];
+            if extract_battery(&ws, flag, cli.lang)? {
+                scripts.push(Script::battery(&ws));
+            }
+            let generated = generate::generate(&ws, &scripts, cli.force)?;
             eprintln!(
                 "generated {} clips in {}: {}",
                 generated.len(),
@@ -190,6 +216,45 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+/// Whether `generate` also extracts the battery clips: `flag` if given (`--battery` or
+/// `--no-battery`), or else the user's answer. They are cut from English originals only: with
+/// originals in another language, this says so and skips them. Without originals, it downloads the
+/// English ones first, unless `lang`, the base language to download, is another.
+fn extract_battery(ws: &Workspace, flag: Option<bool>, lang: Language) -> io::Result<bool> {
+    if flag == Some(false) {
+        return Ok(false);
+    }
+    let base = download::base_language(ws)?;
+    if let Some(other) = base.or(Some(lang)).filter(|l| *l != Language::English) {
+        let which = if base.is_some() {
+            "the originals are"
+        } else {
+            "--lang asks for"
+        };
+        eprintln!(
+            "skipping the battery clips: they can only be cut from English originals, and {which} {}",
+            other.name()
+        );
+        return Ok(false);
+    }
+    let question = if base.is_some() {
+        "Also cut short battery clips from the English originals (\"seventy\" instead of \"battery, about \
+         seventy percent\")? [y/N] "
+    } else {
+        "There are no originals yet. Short battery clips (\"seventy\" instead of \"battery, about seventy \
+         percent\") can be cut from the English originals. Download them and cut the clips? [y/N] "
+    };
+    let extract = match flag {
+        Some(extract) => extract,
+        None => matches!(ask(question)?.to_lowercase().as_str(), "y" | "yes"),
+    };
+    if extract && base.is_none() {
+        let count = download(ws, Language::English)?;
+        eprintln!("saved {count} originals in {}", ws.original.display());
+    }
+    Ok(extract)
 }
 
 fn open_workspace(dir: &Path, force: bool) -> io::Result<Workspace> {

@@ -1,10 +1,13 @@
-//! `generate`: makes changes with the sound script, a bash script that generates clips with ffmpeg.
+//! `generate`: makes changes with bash scripts that make clips with ffmpeg: the sound script generates
+//! tones, and the battery script extracts short battery clips from the English originals.
 //!
-//! The script stays a script so anyone can read and change it. The Nix package installs it next to
-//! the binary and points [`SCRIPT_ENV`] at it; setting that variable runs another copy instead.
+//! The scripts stay scripts so anyone can read and change them. The Nix package installs them next to
+//! the binary and points [`SCRIPT_ENV`] and [`BATTERY_SCRIPT_ENV`] at them; setting those variables
+//! runs other copies instead.
 
 use std::collections::BTreeSet;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,22 +18,52 @@ use crate::workspace::Workspace;
 
 /// Environment variable naming the sound script to run.
 pub const SCRIPT_ENV: &str = "FIX_WHXM4_VOICE_GENERATE_SCRIPT";
-/// Folder in `build/` the script writes into before its clips are moved into `changes/`.
+/// Environment variable naming the battery script to run.
+pub const BATTERY_SCRIPT_ENV: &str = "FIX_WHXM4_VOICE_BATTERY_SCRIPT";
+/// Folder in `build/` the scripts write into before their clips are moved into `changes/`.
 const STAGING: &str = "generated";
 
-/// The sound script: the one [`SCRIPT_ENV`] names, or else the one in the source tree.
-pub fn script() -> PathBuf {
-    env::var_os(SCRIPT_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("sounds/generate.sh"))
+/// A script `generate` runs as `bash <path> <staging folder> <args>...`.
+pub struct Script {
+    pub path: PathBuf,
+    pub args: Vec<OsString>,
 }
 
-/// Runs `script` with bash and moves the clips it writes into `changes/`. Refuses, before touching
-/// `changes/`, if a change for the same slot as a generated clip already exists, unless `force` is
-/// set, which replaces those changes. Returns the names of the generated clips.
-pub fn generate(ws: &Workspace, script: &Path, force: bool) -> io::Result<Vec<String>> {
+impl Script {
+    /// The sound script: the one [`SCRIPT_ENV`] names, or else the one in the source tree.
+    pub fn sounds() -> Self {
+        Script {
+            path: installed(SCRIPT_ENV, "generate.sh"),
+            args: Vec::new(),
+        }
+    }
+
+    /// The battery script, reading the originals of `ws`: the one [`BATTERY_SCRIPT_ENV`] names, or
+    /// else the one in the source tree. Its cut points fit the English originals only.
+    pub fn battery(ws: &Workspace) -> Self {
+        Script {
+            path: installed(BATTERY_SCRIPT_ENV, "battery.sh"),
+            args: vec![ws.original.clone().into_os_string()],
+        }
+    }
+}
+
+/// The script `var` names, or else `name` in the source tree's `sounds/`.
+fn installed(var: &str, name: &str) -> PathBuf {
+    env::var_os(var).map(PathBuf::from).unwrap_or_else(|| {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("sounds")
+            .join(name)
+    })
+}
+
+/// Runs `scripts` with bash, one after another, and moves the clips they write into `changes/`.
+/// Refuses, before touching `changes/`, if a script fails, or if a change for the same slot as a
+/// generated clip already exists, unless `force` is set, which replaces those changes. Returns the
+/// names of the generated clips.
+pub fn generate(ws: &Workspace, scripts: &[Script], force: bool) -> io::Result<Vec<String>> {
     let staging = ws.build.join(STAGING);
-    let result = stage(script, &staging).and_then(|generated| {
+    let result = stage(scripts, &staging).and_then(|generated| {
         replace(ws, &staging, &generated, force)?;
         Ok(generated)
     });
@@ -38,41 +71,55 @@ pub fn generate(ws: &Workspace, script: &Path, force: bool) -> io::Result<Vec<St
     result
 }
 
-/// Runs the script into an empty `staging` folder and returns the names of the clips it wrote.
-fn stage(script: &Path, staging: &Path) -> io::Result<Vec<String>> {
-    if !script.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("the sound script {} does not exist", script.display()),
-        ));
-    }
+/// Runs the scripts into an empty `staging` folder and returns the names of the clips they wrote.
+fn stage(scripts: &[Script], staging: &Path) -> io::Result<Vec<String>> {
     let _ = fs::remove_dir_all(staging);
     fs::create_dir_all(staging)?;
-    let output = Command::new("bash")
-        .arg(script)
-        .arg(staging)
-        .output()
-        .map_err(|e| io::Error::new(e.kind(), format!("cannot run bash: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(io::Error::other(format!(
-            "the sound script {} failed ({}): {}",
-            script.display(),
-            output.status,
-            stderr.trim()
-        )));
+    for script in scripts {
+        run(script, staging)?;
     }
     let generated: Vec<String> = changes::list(staging)?
         .into_iter()
         .map(|clip| clip.name)
         .collect();
     if let Some(name) = generated.iter().find(|name| changes::slot(name).is_none()) {
+        let paths: Vec<String> = scripts
+            .iter()
+            .map(|script| script.path.display().to_string())
+            .collect();
         return Err(io::Error::other(format!(
-            "the sound script {} wrote {name}, which does not start with a slot number",
-            script.display()
+            "a script ({}) wrote {name}, which does not start with a slot number",
+            paths.join(", ")
         )));
     }
     Ok(generated)
+}
+
+/// Runs `script` with bash, writing into `staging`.
+fn run(script: &Script, staging: &Path) -> io::Result<()> {
+    let path = &script.path;
+    if !path.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("the script {} does not exist", path.display()),
+        ));
+    }
+    let output = Command::new("bash")
+        .arg(path)
+        .arg(staging)
+        .args(&script.args)
+        .output()
+        .map_err(|e| io::Error::new(e.kind(), format!("cannot run bash: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(io::Error::other(format!(
+            "the script {} failed ({}): {}",
+            path.display(),
+            output.status,
+            stderr.trim()
+        )));
+    }
+    Ok(())
 }
 
 /// Moves the generated clips from `staging` into `changes/`, after removing changes for the same
@@ -91,7 +138,7 @@ fn replace(ws: &Workspace, staging: &Path, generated: &[String], force: bool) ->
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!(
-                "{} already holds changes for slots the sound script generates: {}; \
+                "{} already holds changes for slots `generate` writes: {}; \
                  run with -f to replace them",
                 ws.changes.display(),
                 conflicts.join(", ")

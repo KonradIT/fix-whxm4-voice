@@ -171,8 +171,6 @@ app for that.
 ## What isn't known yet
 
 - Whether the area the upload writes to is the area holding the installed voice pack (see above).
-- What the headphones do with a pack in the language they are already playing. The tool warns you
-  in that case: they may ignore it.
 - Whether turning the headphones off and on clears update mode and an open upload session.
 - Whether the headphones accept an upload over a different pack that is waiting to be installed.
 - Whether resetting or initializing the headphones restores Sony's voice prompts.

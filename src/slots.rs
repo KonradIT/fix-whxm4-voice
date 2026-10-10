@@ -4,7 +4,8 @@
 pub const SLOT_COUNT: usize = 54;
 
 /// The prompt name of every slot, as used in file names. Speech slots are named after what the
-/// English pack says; tones, whose events are not known yet, are `unknown`.
+/// English pack says. Tones whose event is not known for certain start with `unknown`, followed by
+/// a description or a best guess.
 const PROMPTS: [&str; SLOT_COUNT] = [
     "power-on",                                   // 0
     "power-off",                                  // 1
@@ -16,23 +17,23 @@ const PROMPTS: [&str; SLOT_COUNT] = [
     "ambient-sound-off",                          // 7
     "ambient-sound",                              // 8
     "google-assistant-unavailable-during-update", // 9
-    "unknown",                                    // 10
-    "unknown",                                    // 11
-    "unknown",                                    // 12
-    "unknown",                                    // 13
-    "unknown",                                    // 14
+    "unknown-warning",                            // 10
+    "connection-lost",                            // 11
+    "unknown-ringtone",                           // 12
+    "unknown-notice",                             // 13
+    "unknown-info",                               // 14
     "battery-full",                               // 15
     "battery-70",                                 // 16
     "battery-50",                                 // 17
     "battery-20",                                 // 18
-    "unknown",                                    // 19
-    "unknown",                                    // 20
+    "unknown-google-assistant-start",             // 19
+    "unknown-google-assistant-end",               // 20
     "google-assistant-not-connected",             // 21
-    "unknown",                                    // 22
-    "unknown",                                    // 23
+    "unknown-alexa-start",                        // 22
+    "unknown-alexa-end",                          // 23
     "alexa-not-connected",                        // 24
-    "unknown",                                    // 25
-    "unknown",                                    // 26
+    "unknown-xiaowei-start",                      // 25
+    "unknown-xiaowei-end",                        // 26
     "xiaowei-not-connected",                      // 27
     "battery-90",                                 // 28
     "battery-80",                                 // 29
@@ -43,16 +44,16 @@ const PROMPTS: [&str; SLOT_COUNT] = [
     "low-battery",                                // 34
     "optimizer-start",                            // 35
     "optimizer-finished",                         // 36
-    "unknown",                                    // 37
-    "unknown",                                    // 38
-    "unknown",                                    // 39
-    "unknown",                                    // 40
-    "unknown",                                    // 41
-    "unknown",                                    // 42
+    "optimizer-finished-tone-1",                  // 37
+    "optimizer-finished-tone-2",                  // 38
+    "unknown-volume-1",                           // 39
+    "unknown-volume-2",                           // 40
+    "unknown-volume-3",                           // 41
+    "unknown-notice",                             // 42
     "speak-to-chat-on",                           // 43
     "speak-to-chat-off",                          // 44
-    "unknown",                                    // 45
-    "unknown",                                    // 46
+    "unknown-3-tones-up-chord",                   // 45
+    "unknown-3-tones-down-chord",                 // 46
     "device-1-connected",                         // 47
     "device-1-disconnected",                      // 48
     "device-2-connected",                         // 49

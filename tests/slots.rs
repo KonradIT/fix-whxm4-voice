@@ -18,9 +18,10 @@ fn file_names_carry_slot_number_and_prompt() {
 }
 
 #[test]
-fn slots_of_unknown_purpose_are_named_unknown() {
-    assert_eq!(clip_file_name(10), "10-unknown.mp3");
-    assert_eq!(clip_file_name(46), "46-unknown.mp3");
+fn slots_of_unknown_purpose_start_with_unknown() {
+    assert_eq!(clip_file_name(10), "10-unknown-warning.mp3");
+    assert_eq!(clip_file_name(22), "22-unknown-alexa-start.mp3");
+    assert_eq!(clip_file_name(46), "46-unknown-3-tones-down-chord.mp3");
 }
 
 #[test]

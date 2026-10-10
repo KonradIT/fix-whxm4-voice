@@ -1,4 +1,6 @@
+pub mod audio;
 pub mod build;
+pub mod changes;
 pub mod download;
 pub mod keys;
 pub mod manifest;

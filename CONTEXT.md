@@ -38,7 +38,8 @@ A stock Sony clip, saved in the workspace so it can be listened to and used as t
 _Avoid_: stock file, default
 
 **Change**:
-A user-supplied clip that overrides the original of the same name. An empty change means the slot is silent.
+A user-supplied clip that overrides the original whose slot number its file name starts with. An
+empty change means the slot is silent.
 _Avoid_: override, replacement, custom file
 
 **Base language**:

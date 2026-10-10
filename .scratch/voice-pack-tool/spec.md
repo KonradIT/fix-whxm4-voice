@@ -17,8 +17,8 @@ A Rust command-line tool, `fix-whxm4-voice`, run from a dedicated **workspace** 
 
 1. It downloads the stock **voice pack** for a **base language** (English by default) and saves
    every **clip** as a playable MP3 in `original/`, named by **slot** number and **prompt**.
-2. The user drops **changes** into `changes/`, using the same names as the originals. Any audio
-   format works. An empty file means silence.
+2. The user drops **changes** into `changes/`, each named starting with the slot number of the
+   original it replaces. Any audio format works. An empty file means silence.
 3. The tool builds a modified voice pack in `build/`, checks it fits, and verifies it by unpacking it again.
 4. The tool **uploads** the pack from the PC straight to the headphones over Bluetooth LE, by
    replaying the update procedure the Sony app uses. The phone app is not involved. Ideally the pack
@@ -76,10 +76,10 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
 
 ### Changes
 
-21. As a user, I want a change to override the original with the same name, so that I only add files
+21. As a user, I want a change to override the original with the same slot number, so that I only add files
     for the prompts I want to replace.
-22. As a user, I want a change to match its original by name without the extension, so that
-    `07-ambient-sound-off.wav` replaces `07-ambient-sound-off.mp3`.
+22. As a user, I want a change to match its original by the slot number its name starts with, ignoring the rest, so that
+    `7-ambient-off-8-bit.wav` replaces `07-ambient-sound-off.mp3`.
 23. As a user, I want changes in any format ffmpeg reads to be accepted, so that I don't have to
     convert anything myself.
 24. As a user, I want changes converted to exactly the format of the stock clips (sample rate,
@@ -87,7 +87,7 @@ Running the tool with no subcommand walks through the whole workflow. Each step 
     like the stock clips.
 25. As a user, I want an empty change file to make that slot silent, so that
     `touch changes/00-power-on.mp3` mutes a prompt.
-26. As a user, I want a change whose name matches no original to be an error listing the closest
+26. As a user, I want a change whose name starts with no slot number to be an error listing the closest
     original names, so that a typo is never silently ignored.
 27. As a user, I want every slot without a change to keep its original clip, so that I can replace prompts gradually.
 

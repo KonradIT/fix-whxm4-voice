@@ -1,9 +1,11 @@
-//! `build`: packs the originals into a voice pack in `build/`.
+//! `build`: packs the originals, overridden by the changes, into a voice pack in `build/`.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::audio::{Convert, Ffmpeg};
+use crate::changes::{self, Change};
 use crate::download::STOCK_PACK;
 use crate::invalid;
 use crate::pack::{self, Unpacked};
@@ -13,26 +15,49 @@ use crate::workspace::Workspace;
 /// The built voice pack in `build/`, kept after uploading so a failed upload can be investigated.
 pub const BUILT_PACK: &str = "pack.bin";
 
-/// Packs the originals into a voice pack with the stock pack's metadata, verifies it by unpacking
-/// it again, and writes it to `build/`. Returns the path of the built pack.
+/// Builds the voice pack, converting changes with ffmpeg. See [`build_with`].
 pub fn build(ws: &Workspace) -> io::Result<PathBuf> {
+    build_with(ws, &Ffmpeg)
+}
+
+/// Packs a clip per slot into a voice pack with the stock pack's metadata, verifies it by unpacking
+/// it again, and writes it to `build/`. Each slot gets its change from `changes/`, converted by
+/// `convert` to the format of the stock clip it replaces, or else its original. Returns the path of
+/// the built pack.
+pub fn build_with(ws: &Workspace, convert: &dyn Convert) -> io::Result<PathBuf> {
     let stock = read_stock(&ws.stock.join(STOCK_PACK))?;
     let stock_image_sha256 = stock.metadata.image_sha256;
-    refuse_changes(&ws.changes)?;
-    let unpacked = Unpacked {
-        clips: read_originals(&ws.original)?,
-        ..stock
-    };
+    let resolved = changes::resolve(&changes::list(&ws.changes)?).map_err(|problems| {
+        let lines: Vec<String> = problems
+            .iter()
+            .map(|problem| format!("  {problem}"))
+            .collect();
+        invalid(format!(
+            "cannot apply the changes in {}:\n{}",
+            ws.changes.display(),
+            lines.join("\n")
+        ))
+    })?;
+    let clips = (0..SLOT_COUNT)
+        .map(|slot| {
+            let stock_clip = &stock.clips[slot];
+            match &resolved[slot] {
+                Change::Original => read_original(&ws.original, slot, stock_clip),
+                Change::Replace(name) => convert.convert(&ws.changes.join(name), stock_clip),
+                Change::Silence => convert.silence(stock_clip),
+            }
+        })
+        .collect::<io::Result<_>>()?;
+    let unpacked = Unpacked { clips, ..stock };
     let built = pack::pack(&unpacked)?;
 
     let verified = verify(&built, &unpacked.clips)
         .map_err(|e| invalid(format!("the built voice pack failed verification: {e}")))?;
-    if verified.metadata.image_sha256 != stock_image_sha256 {
-        return Err(invalid(format!(
-            "nothing was changed, but the rebuilt unpacked image differs from the stock one; \
-             has a file in {} been edited? Run `download` to restore the originals",
-            ws.original.display()
-        )));
+    let unchanged = resolved.iter().all(|change| *change == Change::Original);
+    if unchanged && verified.metadata.image_sha256 != stock_image_sha256 {
+        return Err(invalid(
+            "nothing was changed, but the rebuilt unpacked image differs from the stock one",
+        ));
     }
 
     let path = ws.build.join(BUILT_PACK);
@@ -58,34 +83,26 @@ fn read_stock(path: &Path) -> io::Result<Unpacked> {
     })
 }
 
-/// Changes are not supported yet, so any are refused rather than silently left out.
-fn refuse_changes(changes: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(changes)? {
-        if !entry?.file_name().to_string_lossy().starts_with('.') {
-            return Err(io::Error::other(format!(
-                "{} holds files, but changes are not supported yet; empty it to build the unchanged pack",
-                changes.display()
-            )));
-        }
+/// Reads the original of `slot`, which must still be the stock clip: edits belong in `changes/`.
+fn read_original(original: &Path, slot: usize, stock_clip: &[u8]) -> io::Result<Vec<u8>> {
+    let path = original.join(clip_file_name(slot));
+    let clip = fs::read(&path).map_err(|e| {
+        io::Error::new(
+            e.kind(),
+            format!(
+                "cannot read {}: {e}; run `download` to restore the originals",
+                path.display()
+            ),
+        )
+    })?;
+    if clip != stock_clip {
+        return Err(invalid(format!(
+            "{} differs from the stock clip; put your version in changes/ instead, and run \
+             `download` to restore the originals",
+            path.display()
+        )));
     }
-    Ok(())
-}
-
-fn read_originals(original: &Path) -> io::Result<Vec<Vec<u8>>> {
-    (0..SLOT_COUNT)
-        .map(|slot| {
-            let path = original.join(clip_file_name(slot));
-            fs::read(&path).map_err(|e| {
-                io::Error::new(
-                    e.kind(),
-                    format!(
-                        "cannot read {}: {e}; run `download` to restore the originals",
-                        path.display()
-                    ),
-                )
-            })
-        })
-        .collect()
+    Ok(clip)
 }
 
 /// Unpacks a built pack again, which checks every checksum, the slot table and every clip, and

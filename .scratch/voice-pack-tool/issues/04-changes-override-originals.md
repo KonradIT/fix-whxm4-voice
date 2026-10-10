@@ -9,13 +9,13 @@ a change keep their original.
 
 **Blocked by:** 03 (Build an unchanged pack)
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] Matching ignores the extension; two changes for the same slot are an error
 - [x] Converted clips match the measured stock format
 - [x] A zero-byte change becomes a short silent clip in the stock format
 - [x] An unmatched change fails the build and lists the closest original names
-- [ ] The built pack plays the changed clips on the replaced slots (verifiable by unpacking `build/` and listening)
+- [x] The built pack plays the changed clips on the replaced slots (verifiable by unpacking `build/` and listening)
 
 ## Comments
 
@@ -28,3 +28,4 @@ a change keep their original.
 - Changed on request: a change now matches by the slot number its name starts with, and the rest of the name is
   ignored, so `7-ambient-off-8-bit.wav` replaces `07-ambient-sound-off.mp3`. A name with no slot number in 00–53 is
   the "unmatched" error. Updated in `CONTEXT.md` and spec stories 21, 22 and 26.
+- Listened to and confirmed by the user, so resolved.

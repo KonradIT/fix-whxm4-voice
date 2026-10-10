@@ -14,3 +14,9 @@ fn the_pack_id_is_the_code_in_hex() {
     assert_eq!(Language::German.pack_id(), "VGIDLPB0403");
     assert_eq!(Language::Turkish.pack_id(), "VGIDLPB0410");
 }
+
+#[test]
+fn a_code_maps_back_to_its_language() {
+    assert_eq!(Language::from_code(0x10), Some(Language::Turkish));
+    assert_eq!(Language::from_code(0x0A), None);
+}

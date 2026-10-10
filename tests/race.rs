@@ -82,3 +82,53 @@ fn a_request_without_a_reply_times_out() {
         .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::TimedOut);
 }
+
+#[test]
+fn a_request_completed_by_an_indication_skips_the_response_before_it() {
+    let transport = FakeTransport::replying(vec![
+        race::encode(&packet(0x15, race::RESPONSE, 0x0433, &[0x00])),
+        race::encode(&packet(0x15, race::INDICATION, 0x0433, &[0x00, 0x00, 0x01])),
+    ]);
+    let mut link = RaceLink::new(transport);
+
+    let reply = link
+        .request(&packet(0x15, race::COMMAND, 0x0433, &[]))
+        .unwrap();
+
+    assert_eq!(
+        reply,
+        packet(0x15, race::INDICATION, 0x0433, &[0x00, 0x00, 0x01])
+    );
+}
+
+#[test]
+fn a_refusing_response_completes_a_request_that_awaits_an_indication() {
+    let transport = FakeTransport::replying(vec![race::encode(&packet(
+        0x15,
+        race::RESPONSE,
+        0x0404,
+        &[0x0A],
+    ))]);
+    let mut link = RaceLink::new(transport);
+
+    let reply = link
+        .request(&packet(0x15, race::COMMAND, 0x0404, &[]))
+        .unwrap();
+
+    assert_eq!(reply.payload, [0x0A]);
+}
+
+#[test]
+fn a_cancel_from_the_headphones_fails_the_request_with_its_reason() {
+    // What the headphones sent for 0x1C00 outside language update mode, in ticket 07's probe.
+    let transport = FakeTransport::replying(vec![vec![
+        0x15, 0x5A, 0x05, 0x00, 0x03, 0x1C, 0x00, 0x80, 0x04,
+    ]]);
+    let mut link = RaceLink::new(transport);
+
+    let err = link
+        .request(&packet(0x15, race::COMMAND, 0x1C00, &[0x00]))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("not allowed"), "{err}");
+}

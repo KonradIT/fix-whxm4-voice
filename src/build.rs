@@ -17,6 +17,69 @@ use crate::workspace::Workspace;
 /// The built voice pack in `build/`, kept after uploading so a failed upload can be investigated.
 pub const BUILT_PACK: &str = "pack.bin";
 
+/// A voice pack that passed the checks `build` makes before writing one: it unpacks with every
+/// checksum, the slot table and every clip intact, and it is laid out to install as a language other
+/// than English, at [`INSTALLED_BASE`]. Only such a pack can be uploaded.
+pub struct BuiltPack {
+    bytes: Vec<u8>,
+    language: Language,
+}
+
+impl BuiltPack {
+    /// Reads and verifies the pack at `path`, normally [`BUILT_PACK`] in `build/`.
+    pub fn read(path: &Path) -> io::Result<Self> {
+        let bytes = fs::read(path).map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!(
+                    "cannot read the built voice pack {}: {e}; run `build` first",
+                    path.display()
+                ),
+            )
+        })?;
+        Self::verify(bytes).map_err(|e| {
+            invalid(format!(
+                "{} is not a voice pack as `build` makes it: {e}; run `build` again",
+                path.display()
+            ))
+        })
+    }
+
+    /// Verifies `bytes` the way `build` does: a full unpack, then the layout.
+    pub fn verify(bytes: Vec<u8>) -> io::Result<Self> {
+        let unpacked = pack::unpack(&bytes)?;
+        // Only codes `build` writes: how the firmware treats an unknown one is not known (ADR 0003).
+        let language = Language::from_code(unpacked.language).ok_or_else(|| {
+            invalid(format!(
+                "it installs as language {:#x}, which is none of the languages `build` writes",
+                unpacked.language
+            ))
+        })?;
+        if language == Language::English {
+            return Err(invalid(
+                "it installs as English, which the headphones never play from an installed pack",
+            ));
+        }
+        if unpacked.partition_base != INSTALLED_BASE {
+            return Err(invalid(format!(
+                "its slot table points at {:#x}, not at {INSTALLED_BASE:#x} where the headphones keep an \
+                 installed pack",
+                unpacked.partition_base
+            )));
+        }
+        Ok(BuiltPack { bytes, language })
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// The language the headphones install the pack as.
+    pub fn language(&self) -> Language {
+        self.language
+    }
+}
+
 /// Builds the voice pack, converting changes with ffmpeg. See [`build_with`].
 pub fn build(ws: &Workspace, install: Language) -> io::Result<PathBuf> {
     build_with(ws, install, &Ffmpeg)

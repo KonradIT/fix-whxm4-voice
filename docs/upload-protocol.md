@@ -428,10 +428,37 @@ The findings contradicted the first plan. These have been corrected:
 Not confirmed: ADR 0001's "integrity check". The app only triggers `0x1C01` and reads a status. That
 it checks the outer SHA-256 is inferred from the 99 % stall when that hash is wrong (see Progress).
 
+## Dry run on the user's headphones (ticket 09)
+
+`upload --dry-run` on 2026-10-10, firmware `3.0.1`, English active. It switched language update mode on,
+sent the queries up to compare, and switched update mode off. Replies, as payloads (status first):
+
+| Sent | Reply | Meaning |
+|---|---|---|
+| `0x0A00` NV key `0x1002` | `00 00 31` | differs from the `00 00 00` outside update mode; not understood |
+| `0x1C08` `01` | `0x5B` `00`, then `0x5D` `00` | FOTA start: a response, then the indication that completes it |
+| `0x1C1C` `01 00` | `0x5B` `00`, then `0x5D` `00 01 00 c8 00` | role 0, interval 200 ms |
+| `0x1C00` `00` | `00 00 01 00 00 51 00 00 f0 5f 00` | partition ID `0x00`, storage `0x01`, address `0x00510000`, length `0x5FF000` |
+| `0x1C04` | `00 01 01` | state `0x0101`, which the APK notes do not name |
+| `0x1C19` `00` | `0x5B` `00`, then `0x5D` `00 00` | |
+| `0x0433` `01 00`, `0x510000`, `0xA2000` | `0x5D`: echo of the range, bitmap size 21, `ff`×20 `c0` | all 162 blocks erased |
+
+- **The FOTA partition and the voice partition.** `0x00510000` plus about 6 MB matches
+  sony-xm4-voice-mod's second-hand voice partition, 6 MB at `0x0C510000`, read below the `0x0C000000`
+  mapping (see [The voice partition's address range](#the-voice-partitions-address-range-not-settled)).
+  So in language update mode, the partition the headphones report for FOTA looks like that region. This
+  contradicts "the app never addresses the voice partition" in the summary and ADR 0001. The upload
+  still writes only where the headphones point it.
+- **Every block of the pack's range is erased.** With English active, that fits English playing from
+  the built-in bank and the installed-pack area being empty.
+- **The state `0x0101` stays unexplained.** `0x1C08` came before the state query, so it may have
+  set it.
+- **Replies arrive in pairs.** Several replies came as a `0x5B` and a `0x5D` in one read.
+
 ## Still unknown
 
-- The FOTA partition's address and length on this unit: only reported in update mode.
-- Whether the headphones report background or resumable transfer, and the storage-type byte.
+- The meaning of FOTA state `0x0101`, and whether `0x1C08` sets it.
+- Whether the headphones report background or resumable transfer.
 - The voice partition's address range: flash reads are blocked.
 - Firmware behaviour for an unknown language code.
 - The firmware's same-language rule.

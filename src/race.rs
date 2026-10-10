@@ -5,6 +5,7 @@
 use std::collections::VecDeque;
 use std::io;
 
+use crate::fota;
 use crate::invalid;
 use crate::link::{Link, Transport, hex};
 
@@ -72,8 +73,9 @@ impl Decoder {
     }
 }
 
-/// A RACE channel: frames commands and picks out the reply to each, a response or indication with
-/// the command's ID.
+/// A RACE channel: frames commands and picks out the reply to each, the packet with the command's ID
+/// that completes its stage (see [`fota::reply_kind`]). A response with an error status completes it
+/// early, and a cancel from the headphones fails it.
 pub struct RaceLink<T> {
     transport: T,
     decoder: Decoder,
@@ -115,7 +117,18 @@ impl<T: Transport> Link<Packet> for RaceLink<T> {
                 ),
                 _ => e,
             })?;
-            if packet.id == command.id && matches!(packet.kind, RESPONSE | INDICATION) {
+            if packet.id == fota::CANCEL && packet.kind == COMMAND {
+                return Err(io::Error::other(format!(
+                    "the headphones cancelled the update in reply to {:#06x}: {}",
+                    command.id,
+                    fota::cancel_reason(&packet.payload)
+                )));
+            }
+            if packet.id != command.id {
+                continue;
+            }
+            let refused = packet.kind == RESPONSE && packet.payload.first() != Some(&0);
+            if packet.kind == fota::reply_kind(command.id) || refused {
                 return Ok(packet);
             }
         }

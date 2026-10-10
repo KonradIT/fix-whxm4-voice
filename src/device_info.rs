@@ -3,10 +3,11 @@
 use std::fmt;
 use std::io;
 
+use crate::fota;
 use crate::invalid;
 use crate::link::{Link, hex};
 use crate::mdr::{self, Message};
-use crate::race::{self, Packet};
+use crate::race::Packet;
 
 /// The read-only MDR queries listed in `docs/upload-protocol.md`. `device-info` can only send these.
 #[derive(Clone, Copy, Debug)]
@@ -35,17 +36,6 @@ impl Query {
             data_type,
             payload: payload.to_vec(),
         }
-    }
-}
-
-/// The RACE NV-key read of the chip name (`0x0A00`, key `0x1002`, at most 1000 bytes), the one
-/// read-only RACE command the headphones answer outside language update mode.
-fn chip_name_query() -> Packet {
-    Packet {
-        head: 0x05,
-        kind: race::COMMAND,
-        id: 0x0A00,
-        payload: vec![0x02, 0x10, 0xE8, 0x03],
     }
 }
 
@@ -113,7 +103,8 @@ pub fn read(mdr: &mut impl Link<Message>, race: &mut impl Link<Packet>) -> io::R
         .map(|_| Ok((languages.byte()?, languages.string()?)))
         .collect::<io::Result<_>>()?;
 
-    let chip = race.request(&chip_name_query())?;
+    // The one read-only RACE command the headphones answer outside language update mode.
+    let chip = race.request(&fota::read_chip_name())?;
     // Status, u16 length, then the name. The status is 0 on success, as in every RACE reply.
     let chip_name = match chip.payload.as_slice() {
         [0, length_lo, length_hi, name @ ..] => {

@@ -4,9 +4,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use common::{TempDir, clips, unpacked};
+use common::{TempDir, built_pack, clips, unpacked};
 use fix_whxm4_voice::audio::Convert;
-use fix_whxm4_voice::build::{BUILT_PACK, build, build_with};
+use fix_whxm4_voice::build::{BUILT_PACK, BuiltPack, build, build_with};
 use fix_whxm4_voice::download::STOCK_PACK;
 use fix_whxm4_voice::language::Language;
 use fix_whxm4_voice::pack::{INSTALLED_BASE, Unpacked, pack, unpack};
@@ -243,4 +243,70 @@ fn a_change_larger_than_its_stock_clip_builds_when_the_total_fits() {
     let built = built_clips(&ws);
 
     assert!(built[0].len() > clips()[0].len());
+}
+
+#[test]
+fn a_built_pack_reads_back_as_verified() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+    let path = build(&ws, Language::German).unwrap();
+
+    let built = BuiltPack::read(&path).unwrap();
+
+    assert_eq!(built.bytes(), fs::read(&path).unwrap());
+    assert_eq!(built.language(), Language::German);
+}
+
+#[test]
+fn a_missing_built_pack_asks_for_a_build() {
+    let tmp = TempDir::new();
+
+    let err = BuiltPack::read(&tmp.path().join(BUILT_PACK)).err().unwrap();
+
+    assert!(err.to_string().contains("run `build`"), "{err}");
+}
+
+#[test]
+fn a_damaged_pack_is_not_accepted_as_built() {
+    let mut damaged = built_pack();
+    let last = damaged.len() - 1;
+    damaged[last] ^= 0x01;
+
+    assert!(BuiltPack::verify(damaged).is_err());
+}
+
+#[test]
+fn a_pack_not_laid_out_as_build_lays_it_out_is_not_accepted_as_built() {
+    // The English stock pack: language English, slot table at the built-in English.
+    let english = pack(&unpacked(clips())).unwrap();
+    let at_stock_base = pack(&Unpacked {
+        language: 3,
+        ..unpacked(clips())
+    })
+    .unwrap();
+
+    let english = BuiltPack::verify(english).err().unwrap().to_string();
+    let at_stock_base = BuiltPack::verify(at_stock_base).err().unwrap().to_string();
+
+    assert!(english.contains("English"), "{english}");
+    assert!(at_stock_base.contains("0x80000"), "{at_stock_base}");
+}
+
+#[test]
+fn a_pack_as_build_makes_it_is_accepted_as_built() {
+    assert!(BuiltPack::verify(built_pack()).is_ok());
+}
+
+#[test]
+fn a_pack_in_a_language_build_never_writes_is_not_accepted_as_built() {
+    let unknown = pack(&Unpacked {
+        language: 0xFF,
+        partition_base: INSTALLED_BASE,
+        ..unpacked(clips())
+    })
+    .unwrap();
+
+    let err = BuiltPack::verify(unknown).err().unwrap().to_string();
+
+    assert!(err.contains("0xff"), "{err}");
 }

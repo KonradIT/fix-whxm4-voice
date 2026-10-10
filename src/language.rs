@@ -23,6 +23,14 @@ impl Language {
         self as u32
     }
 
+    /// The language with `code`, if it is one of these.
+    pub fn from_code(code: u32) -> Option<Self> {
+        Self::value_variants()
+            .iter()
+            .copied()
+            .find(|language| language.code() == code)
+    }
+
     /// The language pack's directory on the update server, such as `VGIDLPB0401` for English. It
     /// ends in the language code in hex, so Turkish (0x10) is `VGIDLPB0410`.
     pub fn pack_id(self) -> String {

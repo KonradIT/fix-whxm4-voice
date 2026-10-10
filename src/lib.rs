@@ -4,7 +4,9 @@ pub mod build;
 pub mod changes;
 pub mod device_info;
 pub mod download;
+pub mod fota;
 pub mod generate;
+pub mod guard;
 pub mod keys;
 pub mod language;
 pub mod link;
@@ -15,6 +17,7 @@ pub mod race;
 pub mod size;
 pub mod slots;
 pub mod source;
+pub mod upload;
 pub mod workflow;
 pub mod workspace;
 

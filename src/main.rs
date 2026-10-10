@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use fix_whxm4_voice::bluetooth::{self, Headphones};
-use fix_whxm4_voice::build::build;
+use fix_whxm4_voice::build::{BUILT_PACK, BuiltPack, build};
 use fix_whxm4_voice::device_info;
 use fix_whxm4_voice::download::download;
 use fix_whxm4_voice::generate;
@@ -13,6 +13,7 @@ use fix_whxm4_voice::language::Language;
 use fix_whxm4_voice::mdr::MdrLink;
 use fix_whxm4_voice::race::RaceLink;
 use fix_whxm4_voice::source;
+use fix_whxm4_voice::upload::{self, Mode};
 use fix_whxm4_voice::workflow;
 use fix_whxm4_voice::workspace::Workspace;
 
@@ -59,9 +60,14 @@ enum Command {
     Build,
     /// Upload the built voice pack to the headphones over Bluetooth
     Upload {
-        /// Go through every step except erasing and writing
+        /// Switch the headphones' language update mode on, report the FOTA partition and what the
+        /// upload would erase and write, and switch it off again. Nothing is erased, written,
+        /// checked or committed
         #[arg(long)]
         dry_run: bool,
+        /// Log every command and reply as raw bytes
+        #[arg(short, long)]
+        verbose: bool,
     },
     /// Show what the headphones report about themselves, sending read-only queries only
     DeviceInfo {
@@ -133,9 +139,23 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             );
             Ok(ExitCode::SUCCESS)
         }
-        Some(Command::Upload { dry_run: _ }) => {
-            open_workspace(&cli.dir, cli.force)?;
-            not_implemented("upload")
+        Some(Command::Upload { dry_run, verbose }) => {
+            let ws = open_workspace(&cli.dir, cli.force)?;
+            if !dry_run {
+                // Writing waits for the confirmation and checks of ticket 10.
+                return not_implemented("upload without --dry-run");
+            }
+            let pack = BuiltPack::read(&ws.build.join(BUILT_PACK))?;
+            let headphones = Headphones::find()?;
+            eprintln!("found {} ({})", headphones.name, headphones.address);
+            let mut mdr = MdrLink::new(headphones.open(bluetooth::MDR_UUID, "MDR", verbose)?);
+            let mut race = RaceLink::new(headphones.open(bluetooth::RACE_UUID, "RACE", verbose)?);
+            let plan = upload::run(&mut mdr, &mut race, &pack, Mode::DryRun)?;
+            println!("{plan}");
+            eprintln!(
+                "dry run: nothing was erased, written or committed, and language update mode is off again"
+            );
+            Ok(ExitCode::SUCCESS)
         }
         Some(Command::DeviceInfo { verbose }) => {
             let headphones = Headphones::find()?;

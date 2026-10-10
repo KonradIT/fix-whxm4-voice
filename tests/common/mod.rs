@@ -97,3 +97,32 @@ impl Transport for FakeTransport {
             .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "no reply"))
     }
 }
+
+/// A pack the way `build` makes it: German, at the installed base. Its clips are noise, which does
+/// not compress, so the pack spans several 4 KB blocks. Packed once per test crate.
+pub fn built_pack() -> Vec<u8> {
+    static PACK: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    PACK.get_or_init(|| {
+        let mut state = 0x2545_f491_u32;
+        let noise = clips()
+            .iter()
+            .map(|clip| {
+                clip.iter()
+                    .map(|_| {
+                        state ^= state << 13;
+                        state ^= state >> 17;
+                        state ^= state << 5;
+                        state as u8
+                    })
+                    .collect()
+            })
+            .collect();
+        fix_whxm4_voice::pack::pack(&Unpacked {
+            language: 3,
+            partition_base: fix_whxm4_voice::pack::INSTALLED_BASE,
+            ..unpacked(noise)
+        })
+        .unwrap()
+    })
+    .clone()
+}

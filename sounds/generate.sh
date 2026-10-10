@@ -133,9 +133,11 @@ clip 04-bluetooth-disconnected.wav 0.3 anull "dot:$a5" "gap:$pause" "$disconnect
 clip 48-device-1-disconnected.wav 0.3 anull "dot:$a5" "gap:$pause" "$disconnect"
 clip 50-device-2-disconnected.wav 0.4 anull "dot:$a5" "gap:$pause" "dot:$a5" "gap:$pause" "$disconnect"
 
-# Slot 5, recharge power off: three short tones, like a low battery warning, then power off.
-clip 05-recharge-power-off.wav 0.6 anull \
-    "dot:$e5" gap:0.05 "dot:$e5" gap:0.05 "dot:$e5" gap:0.1 "$power_off"
+# Slot 34, low battery: three short tones at E5.
+low_battery=("dot:$e5" gap:0.05 "dot:$e5" gap:0.05 "dot:$e5")
+clip 34-low-battery.wav 0.3 anull "${low_battery[@]}"
+# Slot 5, recharge power off: the low battery warning, then power off.
+clip 05-recharge-power-off.wav 0.6 anull "${low_battery[@]}" gap:0.1 "$power_off"
 
 # Slot 11, connection lost: a scratchy fall over the same length as a disconnect.
 clip 11-connection-lost.wav 0.3 "$scratchy" "slide:$a5:$a3:0.2:0.23"

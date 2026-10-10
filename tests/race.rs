@@ -1,9 +1,11 @@
 mod common;
 
 use std::io;
+use std::time::Duration;
 
 use common::FakeTransport;
-use fix_whxm4_voice::link::Link;
+use fix_whxm4_voice::fota;
+use fix_whxm4_voice::link::{Link, REPLY_TIMEOUT};
 use fix_whxm4_voice::race::{self, Decoder, Packet, RaceLink};
 
 fn packet(head: u8, kind: u8, id: u16, payload: &[u8]) -> Packet {
@@ -131,4 +133,25 @@ fn a_cancel_from_the_headphones_fails_the_request_with_its_reason() {
         .unwrap_err();
 
     assert!(err.to_string().contains("not allowed"), "{err}");
+}
+
+#[test]
+fn the_install_command_waits_as_long_as_the_app_and_other_commands_the_usual_time() {
+    let mut link = RaceLink::new(FakeTransport::replying(vec![race::encode(&packet(
+        0x15,
+        race::RESPONSE,
+        fota::QUERY_STATE,
+        &[0x00, 0xFF, 0xFF],
+    ))]));
+    link.request(&fota::query_state()).unwrap();
+    let _ = link.request(&fota::commit());
+
+    let transport = link.into_transport();
+    assert_eq!(transport.timeouts[0], REPLY_TIMEOUT);
+    assert!(
+        transport.timeouts[1..]
+            .iter()
+            .all(|&t| t == fota::COMMIT_TIMEOUT)
+    );
+    assert_eq!(fota::COMMIT_TIMEOUT, Duration::from_secs(15));
 }

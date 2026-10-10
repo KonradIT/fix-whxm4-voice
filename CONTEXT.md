@@ -48,7 +48,8 @@ _Avoid_: source language, download language
 
 **Install language**:
 The language a built voice pack declares itself to be, and so the language whose prompts it replaces
-on the headphones. German by default; never English, which is built into the headphones.
+on the headphones. German by default. English is possible after a warning, but probably has no effect,
+because English is built into the headphones.
 _Avoid_: target language, pack language
 
 **Upload**:

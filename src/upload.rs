@@ -9,9 +9,11 @@ use std::io;
 use sha2::{Digest, Sha256};
 
 use crate::build::BuiltPack;
+use crate::device_info::language_name;
 use crate::fota::{self, BLOCK_SIZE, ERASE_STATUS_MAX, PAGE_SIZE, Partition};
 use crate::guard::{Guard, Writes};
 use crate::invalid;
+use crate::language::Language;
 use crate::link::{Link, hex};
 use crate::mdr::{self, Message};
 use crate::race::Packet;
@@ -52,10 +54,55 @@ pub struct Plan {
     /// The FOTA state before the transfer.
     pub state: u16,
     pub pack_len: usize,
+    /// The language the pack installs as.
+    pub install: Language,
+    /// The language the headphones play before the upload, as an MDR language code.
+    pub active: u8,
     pub blocks: Vec<Block>,
 }
 
+/// The person running the upload, who sees the plan and the progress of the transfer.
+pub trait Operator {
+    /// Shows `plan` before anything is erased or written, and returns whether to go ahead.
+    fn confirm(&mut self, plan: &Plan) -> io::Result<bool>;
+
+    /// Reports that `done` of the transfer's `total` steps are done. The last step is the
+    /// headphones' checksum check, so `done == total` only once they have accepted the pack.
+    fn progress(&mut self, done: usize, total: usize);
+}
+
+/// How an upload ended, when nothing went wrong.
+#[derive(Debug)]
+pub enum Outcome {
+    /// A dry run: the plan only.
+    Planned(Plan),
+    /// The operator saw the plan and declined; nothing was erased or written.
+    Declined(Plan),
+    /// The headphones accepted the pack, and it was committed for them to install.
+    Committed(Plan),
+}
+
+/// Appended to every failure once writing has begun.
+const RESTORE: &str = "if the headphones' voice prompts are wrong or missing after this, picking a \
+     stock language in the Sony app installs a stock voice pack again";
+
 impl Plan {
+    /// Whether the headphones already play the language the pack installs as. They may then ignore
+    /// the pack.
+    pub fn install_language_active(&self) -> bool {
+        self.active as u32 == self.install.code()
+    }
+
+    /// Whether the headphones hold this pack, checked and waiting to be installed, so that only the
+    /// commit is left to send, as the app does in that state.
+    pub fn commit_only(&self) -> bool {
+        self.state == fota::STATE_CHECKED
+            && self
+                .blocks
+                .iter()
+                .all(|b| b.action == Action::Keep || (b.action == Action::Program && b.pages == 0))
+    }
+
     /// The pages to program, over all blocks.
     pub fn pages(&self) -> usize {
         self.blocks.iter().map(|b| b.pages).sum()
@@ -68,35 +115,58 @@ impl Plan {
 }
 
 /// Runs the update sequence for `pack` in `mode`, switching language update mode on `mdr` and
-/// sending the FOTA commands on `race` through the [`Guard`]. Returns the plan once the headphones'
-/// checksum check passed and the commit was sent, or for a dry run, once update mode is off again.
+/// sending the FOTA commands on `race` through the [`Guard`]. For an upload, `operator` sees the plan
+/// and must confirm it before the guard lets any write through, and then follows the progress.
+/// Returns once the headphones' checksum check passed and the commit was sent, once the operator
+/// declined, or for a dry run, once update mode is off again.
 pub fn run(
     mdr: &mut impl Link<Message>,
     race: &mut impl Link<Packet>,
     pack: &BuiltPack,
     mode: Mode,
-) -> io::Result<Plan> {
-    let writes = match mode {
-        Mode::DryRun => Writes::Refused,
-        Mode::Upload => Writes::Allowed,
-    };
-    let mut race = Guard::new(race, pack.bytes().len(), writes);
+    operator: &mut impl Operator,
+) -> io::Result<Outcome> {
+    let active = current_language(mdr)?;
+    // Writes stay refused until the operator has confirmed the plan.
+    let mut race = Guard::new(race, pack.bytes().len(), Writes::Refused);
 
-    let transferred = set_update_mode(mdr, true).and_then(|()| transfer(&mut race, pack, mode));
+    let transferred =
+        set_update_mode(mdr, true).and_then(|()| transfer(&mut race, pack, active, mode, operator));
     // The app switches update mode off between the transfer and the install; after a failure,
     // switch it off all the same.
     let off = set_update_mode(mdr, false);
-    let plan = transferred?;
+    let outcome = transferred?;
     off?;
 
-    if mode == Mode::Upload {
+    if let Outcome::Committed(_) = outcome {
         let committed = set_update_mode(mdr, true).and_then(|()| commit(&mut race));
         if committed.is_err() {
             let _ = set_update_mode(mdr, false);
         }
-        committed?;
+        committed.map_err(rejected)?;
     }
-    Ok(plan)
+    Ok(outcome)
+}
+
+/// `e` with [`RESTORE`] appended.
+fn rejected(e: io::Error) -> io::Error {
+    io::Error::new(e.kind(), format!("{e}\n{RESTORE}"))
+}
+
+/// The voice-guidance language the headphones play, as an MDR language code. Read-only.
+fn current_language(mdr: &mut impl Link<Message>) -> io::Result<u8> {
+    let query = [0x46, 0x01, 0x02];
+    let reply = mdr.request(&Message {
+        data_type: mdr::DATA_MDR_NO2,
+        payload: query.to_vec(),
+    })?;
+    match reply.payload[..] {
+        [0x47, 0x01, 0x02, code] => Ok(code),
+        _ => Err(invalid(format!(
+            "the headphones answered the current-language query with {}",
+            hex(&reply.payload)
+        ))),
+    }
 }
 
 /// Switches the headphones' language update mode, without which they refuse the FOTA queries.
@@ -123,13 +193,15 @@ fn set_update_mode(mdr: &mut impl Link<Message>, on: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// Steps 2 to 4 of the sequence: the queries, then for an upload the transfer up to the
-/// integrity check and the final state query.
+/// Steps 2 to 4 of the sequence: the queries, then for an upload the operator's confirmation and
+/// the transfer up to the integrity check and the final state query.
 fn transfer<L: Link<Packet>>(
     race: &mut Guard<L>,
     pack: &BuiltPack,
+    active: u8,
     mode: Mode,
-) -> io::Result<Plan> {
+    operator: &mut impl Operator,
+) -> io::Result<Outcome> {
     // The chip name only picks the app's chip type, and the headphones report none.
     race.request(&fota::read_chip_name())?;
     fota::check_status(&race.request(&fota::start())?, "FOTA start")?;
@@ -140,14 +212,6 @@ fn transfer<L: Link<Packet>>(
     }
     let partition = Partition::parse(&race.request(&fota::partition_info())?)?;
     let state = fota::parse_state(&race.request(&fota::query_state())?)?;
-    if state == fota::STATE_CHECKED {
-        // The app would skip the transfer and commit whatever is staged.
-        return Err(io::Error::other(format!(
-            "the FOTA partition at {:#x} holds an image that passed the headphones' check but was never \
-             committed; the Sony app would commit that image instead of this pack, so nothing is sent",
-            partition.address
-        )));
-    }
     let bytes = pack.bytes();
     if fota::rounded(bytes.len()) > partition.length as usize {
         return Err(io::Error::other(format!(
@@ -195,12 +259,24 @@ fn transfer<L: Link<Packet>>(
         partition,
         state,
         pack_len: bytes.len(),
+        install: pack.language(),
+        active,
         blocks,
     };
-    if mode == Mode::Upload {
-        write(race, &plan, bytes)?;
+    if mode == Mode::DryRun {
+        return Ok(Outcome::Planned(plan));
     }
-    Ok(plan)
+    // A different pack waiting for its commit is written over like any other flash content. The app
+    // never does this: it would commit the waiting pack instead.
+    if !operator.confirm(&plan)? {
+        return Ok(Outcome::Declined(plan));
+    }
+    race.allow_writes();
+    if !plan.commit_only() {
+        write(race, &plan, bytes, operator).map_err(rejected)?;
+    }
+    // `run` sends the commit next.
+    Ok(Outcome::Committed(plan))
 }
 
 /// Asks which 4 KB blocks of the pack's range are erased, at most [`ERASE_STATUS_MAX`] at a time.
@@ -249,8 +325,22 @@ fn pages(data: &[u8], address: u32) -> impl Iterator<Item = (u32, [u8; PAGE_SIZE
 }
 
 /// The transfer proper: erase, program, integrity check, and the state the app leaves behind.
-fn write<L: Link<Packet>>(race: &mut Guard<L>, plan: &Plan, pack: &[u8]) -> io::Result<()> {
+/// `operator` hears of every erase, every page and the integrity check as one step each.
+fn write<L: Link<Packet>>(
+    race: &mut Guard<L>,
+    plan: &Plan,
+    pack: &[u8],
+    operator: &mut impl Operator,
+) -> io::Result<()> {
     let storage = plan.partition.storage;
+    let erases = plan
+        .blocks
+        .iter()
+        .filter(|b| b.action == Action::EraseAndProgram)
+        .count();
+    let total = erases + plan.pages() + 1;
+    let mut done = 0;
+    operator.progress(done, total);
     fota::check_status(
         &race.request(&fota::start_transaction())?,
         "start transaction",
@@ -267,6 +357,8 @@ fn write<L: Link<Packet>>(race: &mut Guard<L>, plan: &Plan, pack: &[u8]) -> io::
             let reply = race.request(&fota::erase(storage, block.address))?;
             fota::check_status(&reply, "erase")?;
             confirm_address(&reply, 6, block.address, "erase")?;
+            done += 1;
+            operator.progress(done, total);
         }
     }
 
@@ -284,6 +376,8 @@ fn write<L: Link<Packet>>(race: &mut Guard<L>, plan: &Plan, pack: &[u8]) -> io::
                 let reply = race.request(&fota::page_program(storage, address, &page))?;
                 fota::check_status(&reply, "page program")?;
                 confirm_address(&reply, 3, address, "page program")?;
+                done += 1;
+                operator.progress(done, total);
             }
         }
     }
@@ -291,10 +385,10 @@ fn write<L: Link<Packet>>(race: &mut Guard<L>, plan: &Plan, pack: &[u8]) -> io::
     let check = race.request(&fota::check_integrity(storage))?;
     if let Err(e) = fota::check_status(&check, "the checksum check") {
         return Err(io::Error::other(format!(
-            "the headphones' checksum check failed, so they did not accept the pack and nothing was \
-             committed: {e}"
+            "the headphones' checksum check failed, so they rejected the pack: {e}"
         )));
     }
+    operator.progress(total, total);
     write_state(race, fota::STATE_CHECKED)?;
     let state = fota::parse_state(&race.request(&fota::query_state())?)?;
     if state != fota::STATE_CHECKED {
@@ -339,6 +433,14 @@ fn commit<L: Link<Packet>>(race: &mut Guard<L>) -> io::Result<()> {
         {
             Ok(())
         }
+        Err(e) if e.kind() == io::ErrorKind::TimedOut => Err(io::Error::new(
+            e.kind(),
+            format!(
+                "the headphones neither answered the install command nor restarted within {} s; they may \
+                 still install the pack: once they have restarted, check the language with `device-info`",
+                fota::COMMIT_TIMEOUT.as_secs()
+            ),
+        )),
         Err(e) => Err(e),
     }
 }
@@ -365,7 +467,7 @@ impl fmt::Display for Plan {
         let p = &self.partition;
         writeln!(
             f,
-            "FOTA partition:  {:#010x}..{:#010x} ({:#x} bytes), ID {:#04x}, storage type {:#04x}",
+            "FOTA partition:   {:#010x}..{:#010x} ({:#x} bytes), ID {:#04x}, storage type {:#04x}",
             p.address,
             p.address as u64 + p.length as u64,
             p.length,
@@ -377,21 +479,53 @@ impl fmt::Display for Plan {
             fota::STATE_ERASING | fota::STATE_ERASED | fota::STATE_PROGRAMMING => {
                 " (an earlier transfer was interrupted)"
             }
+            fota::STATE_CHECKED if self.commit_only() => {
+                " (this pack, checked, waits to be installed)"
+            }
+            fota::STATE_CHECKED => {
+                " (another pack, checked, waits to be installed; this upload replaces it)"
+            }
             _ => " (not in the protocol notes)",
         };
-        writeln!(f, "FOTA state:      {:#06x}{state}", self.state)?;
+        writeln!(f, "FOTA state:       {:#06x}{state}", self.state)?;
         writeln!(
             f,
-            "Pack:            {} bytes, {} blocks of 4 KB",
+            "Pack:             {} bytes, {} blocks of 4 KB",
             self.pack_len,
             self.blocks.len()
         )?;
         writeln!(
             f,
-            "Planned range:   {:#010x}..{:#010x}, the pack rounded up to 4 KB",
+            "Planned range:    {:#010x}..{:#010x}, the pack rounded up to 4 KB",
             p.address,
             self.end()
         )?;
+        writeln!(
+            f,
+            "Current language: {} ({:#04x})",
+            language_name(self.active),
+            self.active
+        )?;
+        writeln!(
+            f,
+            "Install as:       {}",
+            language_name(self.install.code() as u8)
+        )?;
+        if self.install == Language::English {
+            writeln!(
+                f,
+                "warning:          English is built into the headphones, which probably keep playing the \
+                 built-in English instead of this pack"
+            )?;
+        }
+        if self.install_language_active() {
+            writeln!(
+                f,
+                "warning:          the headphones already play {}, and may ignore a pack in the language \
+                 they play; build it as another language with --install-lang",
+                language_name(self.install.code() as u8)
+            )?;
+        }
         let count = |action| self.blocks.iter().filter(|b| b.action == action).count();
         let line = |f: &mut fmt::Formatter, label: &str, action: Action, what: &str| {
             let n = count(action);
@@ -407,17 +541,29 @@ impl fmt::Display for Plan {
         };
         line(
             f,
-            "Unchanged:       ",
+            "Already in place: ",
             Action::Keep,
-            "already holding the pack",
+            "already hold this pack and stay as they are",
         )?;
-        line(f, "Already erased:  ", Action::Program, "to program only")?;
         line(
             f,
-            "Erase:           ",
-            Action::EraseAndProgram,
-            "to erase and program",
+            "Write only:       ",
+            Action::Program,
+            "are blank, so they are written without erasing",
         )?;
-        write!(f, "Program:         {} pages of 256 bytes", self.pages())
+        line(
+            f,
+            "Erase and write:  ",
+            Action::EraseAndProgram,
+            "hold other data, so they are erased, then written",
+        )?;
+        write!(f, "To write:         {} pages of 256 bytes", self.pages())?;
+        if self.commit_only() {
+            write!(
+                f,
+                "\nUpload:           only the install command, for the pack the headphones already hold"
+            )?;
+        }
+        Ok(())
     }
 }

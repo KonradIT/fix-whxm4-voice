@@ -40,6 +40,11 @@ impl<'a, L: Link<Packet>> Guard<'a, L> {
         }
     }
 
+    /// Lets the commands that change flash or the FOTA state through from now on.
+    pub fn allow_writes(&mut self) {
+        self.writes = Writes::Allowed;
+    }
+
     /// The FOTA partition the headphones reported, once they have.
     pub fn partition(&self) -> Option<Partition> {
         self.partition

@@ -173,7 +173,7 @@ impl Reply {
 }
 
 /// The name of an MDR language code, from `docs/upload-protocol.md`.
-fn language_name(code: u8) -> &'static str {
+pub fn language_name(code: u8) -> &'static str {
     match code {
         0x00 => "undefined",
         0x01 => "English",

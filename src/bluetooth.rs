@@ -20,8 +20,6 @@ pub const MDR_UUID: Uuid = Uuid::from_u128(0x96cc203e_5068_46ad_b32d_e316f5e069b
 /// Airoha's RACE channel, `Airoha_APP` in SDP.
 pub const RACE_UUID: Uuid = Uuid::from_u128(0x8901dfa8_5c7e_4d8f_9f0c_c2b70683f5f0);
 
-/// How long to wait for the headphones to say anything.
-const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long BlueZ may take to open a channel.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -60,9 +58,16 @@ impl Headphones {
             .runtime
             .block_on(open(&self.session, &self.device, uuid))
             .map_err(|e| {
+                // BlueZ reports this when the link is busy, which is usually audio playing.
+                let hint = if e.to_string().contains("br-connection-busy") {
+                    "\nThis often means the headphones are, or just were, playing audio. If audio is playing, \
+                     stop it, wait a few seconds and try again; if not, try again right away."
+                } else {
+                    ""
+                };
                 io::Error::new(
                     e.kind(),
-                    format!("cannot open the {label} channel ({uuid}): {e}"),
+                    format!("cannot open the {label} channel ({uuid}): {e}{hint}"),
                 )
             })?;
         Ok(Channel {
@@ -185,11 +190,11 @@ impl Transport for Channel {
         self.runtime.block_on(self.stream.write_all(bytes))
     }
 
-    fn receive(&mut self) -> io::Result<Vec<u8>> {
+    fn receive(&mut self, wait: Duration) -> io::Result<Vec<u8>> {
         let mut buffer = vec![0; 1024];
         let read = self
             .runtime
-            .block_on(async { timeout(REPLY_TIMEOUT, self.stream.read(&mut buffer)).await });
+            .block_on(async { timeout(wait, self.stream.read(&mut buffer)).await });
         let n = read.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "timed out"))??;
         if n == 0 {
             return Err(io::Error::new(

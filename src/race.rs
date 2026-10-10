@@ -4,6 +4,7 @@
 
 use std::collections::VecDeque;
 use std::io;
+use std::time::Duration;
 
 use crate::fota;
 use crate::invalid;
@@ -95,12 +96,13 @@ impl<T: Transport> RaceLink<T> {
         self.transport
     }
 
-    fn next_packet(&mut self) -> io::Result<Packet> {
+    /// The next packet, waiting at most `timeout` for each read.
+    fn next_packet(&mut self, timeout: Duration) -> io::Result<Packet> {
         loop {
             if let Some(packet) = self.received.pop_front() {
                 return Ok(packet);
             }
-            let bytes = self.transport.receive()?;
+            let bytes = self.transport.receive(timeout)?;
             self.received.extend(self.decoder.push(&bytes)?);
         }
     }
@@ -110,13 +112,15 @@ impl<T: Transport> Link<Packet> for RaceLink<T> {
     fn request(&mut self, command: &Packet) -> io::Result<Packet> {
         self.transport.send(&encode(command))?;
         loop {
-            let packet = self.next_packet().map_err(|e| match e.kind() {
-                io::ErrorKind::TimedOut => io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    format!("no RACE reply to {:#06x}", command.id),
-                ),
-                _ => e,
-            })?;
+            let packet = self
+                .next_packet(fota::reply_timeout(command.id))
+                .map_err(|e| match e.kind() {
+                    io::ErrorKind::TimedOut => io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("no RACE reply to {:#06x}", command.id),
+                    ),
+                    _ => e,
+                })?;
             if packet.id == fota::CANCEL && packet.kind == COMMAND {
                 return Err(io::Error::other(format!(
                     "the headphones cancelled the update in reply to {:#06x}: {}",

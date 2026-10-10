@@ -4,9 +4,10 @@
 //! the offsets here count from the payload, 6 bytes later, so the status is `payload[0]`.
 
 use std::io;
+use std::time::Duration;
 
 use crate::invalid;
-use crate::link::hex;
+use crate::link::{REPLY_TIMEOUT, hex};
 use crate::race::{self, Packet};
 
 /// The head byte of every packet the FOTA engine sends.
@@ -60,6 +61,18 @@ pub const ERASE_STATUS_MAX: usize = 0x20_0000;
 /// `len` rounded up to whole 4 KB blocks: the range an upload of `len` bytes may erase.
 pub fn rounded(len: usize) -> usize {
     len.div_ceil(BLOCK_SIZE) * BLOCK_SIZE
+}
+
+/// How long the app waits after the commit for the headphones to restart, which drops the link.
+pub const COMMIT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long to wait for the reply to command `id`: the commit waits as long as the app does.
+pub fn reply_timeout(id: u16) -> Duration {
+    if id == COMMIT {
+        COMMIT_TIMEOUT
+    } else {
+        REPLY_TIMEOUT
+    }
 }
 
 /// The packet type that completes the stage of command `id`: an indication or a response.

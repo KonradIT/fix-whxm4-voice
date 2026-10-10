@@ -1,4 +1,4 @@
-use fix_whxm4_voice::audio::{Format, MpegVersion, measure};
+use fix_whxm4_voice::audio::{Convert, Ffmpeg, Format, MpegVersion, measure};
 
 /// Frame header of a stock speech clip: MPEG-1 Layer III, 64 kbit/s, 48 kHz, mono. 192-byte frames.
 const SPEECH: [u8; 4] = [0xFF, 0xFB, 0x54, 0xC4];
@@ -112,4 +112,15 @@ fn a_format_reads_as_a_short_description() {
         STOCK_SPEECH.to_string(),
         "MPEG-1 Layer III, 48000 Hz, mono, 64 kbit/s CBR"
     );
+}
+
+#[test]
+fn a_silent_clip_is_the_shortest_ffmpeg_makes_in_the_stock_format() {
+    let stock = frames(SPEECH, 192, 5);
+
+    let silence = Ffmpeg.silence(&stock).unwrap();
+
+    assert_eq!(measure(&silence).unwrap(), STOCK_SPEECH);
+    // Two frames of 1152 samples at 48 kHz: 48 ms.
+    assert_eq!(silence.len(), 2 * 192);
 }

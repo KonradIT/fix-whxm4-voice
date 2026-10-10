@@ -1,7 +1,9 @@
 //! The default command: sets up the workspace for changes and explains the next step.
 
 use std::io;
+use std::path::Path;
 
+use crate::changes;
 use crate::download::{download_with, downloaded};
 use crate::language::Language;
 use crate::source::Stock;
@@ -20,16 +22,69 @@ pub fn prepare(
     download_with(ws, lang, fetch).map(Some)
 }
 
-/// Tells the user where to put changes and that `upload_command` uploads them.
-pub fn next_steps(ws: &Workspace, upload_command: &str) -> String {
+/// Tells the user where to put changes, and that running `command`, the default command, again
+/// builds and uploads them.
+pub fn next_steps(ws: &Workspace, command: &str) -> String {
     format!(
         "Next steps:\n\
          \x20 1. Listen to the originals in {original}.\n\
          \x20 2. Put your changes in {changes}.\n\
          \x20    Name each like the original it overrides (only the leading slot number counts).\n\
          \x20    They may be in any audio format. An empty file means silence.\n\
-         \x20 3. Run `{upload_command}` to build the voice pack and upload it to the headphones.",
+         \x20 3. Run `{command}` again to build the voice pack and upload it to the headphones.",
         original = ws.original.display(),
         changes = ws.changes.display(),
     )
+}
+
+/// The names of the changes in `changes/`, sorted, which the default command offers to upload.
+pub fn change_names(ws: &Workspace) -> io::Result<Vec<String>> {
+    Ok(changes::list(&ws.changes)?
+        .into_iter()
+        .map(|change| change.name)
+        .collect())
+}
+
+/// Tells the user what is in place once there are `changes`: the originals, and every change.
+pub fn done_steps(ws: &Workspace, changes: &[String]) -> String {
+    let noun = if changes.len() == 1 {
+        "change"
+    } else {
+        "changes"
+    };
+    let list: Vec<String> = changes
+        .iter()
+        .map(|name| format!("\n       {name}"))
+        .collect();
+    format!(
+        "Done so far:\n\
+         \x20 1. The originals are in {original}.\n\
+         \x20 2. {count} {noun} in {changes_dir}:{list}",
+        original = ws.original.display(),
+        count = changes.len(),
+        changes_dir = ws.changes.display(),
+        list = list.concat(),
+    )
+}
+
+/// Tells the user which voice pack an upload or `build` uses: the pack at `path`, built just now if
+/// `rebuilt` or else found up to date, with `changes`. Showing the install language is the upload's
+/// job, in its plan.
+pub fn build_report(path: &Path, changes: &[String], rebuilt: bool) -> String {
+    let what = if rebuilt {
+        format!("built and verified {}", path.display())
+    } else {
+        format!(
+            "using {}, not rebuilt because no original or change is newer",
+            path.display()
+        )
+    };
+    match changes.len() {
+        0 => format!("{what}, with no changes: the originals only"),
+        n => {
+            let noun = if n == 1 { "change" } else { "changes" };
+            let list: Vec<String> = changes.iter().map(|name| format!("\n  {name}")).collect();
+            format!("{what}, with {n} {noun}:{}", list.concat())
+        }
+    }
 }

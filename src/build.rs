@@ -3,6 +3,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use crate::audio::{Convert, Ffmpeg};
 use crate::changes::{self, Change};
@@ -18,8 +19,8 @@ use crate::workspace::Workspace;
 pub const BUILT_PACK: &str = "pack.bin";
 
 /// A voice pack that passed the checks `build` makes before writing one: it unpacks with every
-/// checksum, the slot table and every clip intact, and it is laid out to install as a language other
-/// than English, at [`INSTALLED_BASE`]. Only such a pack can be uploaded.
+/// checksum, the slot table and every clip intact, and it is laid out to install as one of the
+/// languages `build` writes, at [`INSTALLED_BASE`]. Only such a pack can be uploaded.
 pub struct BuiltPack {
     bytes: Vec<u8>,
     language: Language,
@@ -55,11 +56,6 @@ impl BuiltPack {
                 unpacked.language
             ))
         })?;
-        if language == Language::English {
-            return Err(invalid(
-                "it installs as English, which the headphones never play from an installed pack",
-            ));
-        }
         if unpacked.partition_base != INSTALLED_BASE {
             return Err(invalid(format!(
                 "its slot table points at {:#x}, not at {INSTALLED_BASE:#x} where the headphones keep an \
@@ -80,6 +76,69 @@ impl BuiltPack {
     }
 }
 
+/// The built voice pack, as [`fresh_with`] finds or makes it.
+pub struct Fresh {
+    pub pack: BuiltPack,
+    /// Whether the pack was built just now.
+    pub rebuilt: bool,
+}
+
+/// The install language of a build when none is given and there is no earlier build.
+pub const DEFAULT_INSTALL: Language = Language::German;
+
+/// The built voice pack, rebuilt first with ffmpeg if it is stale. See [`fresh_with`].
+pub fn fresh(ws: &Workspace, install: Option<Language>) -> io::Result<Fresh> {
+    fresh_with(ws, install, &Ffmpeg)
+}
+
+/// The built voice pack, in `install` if given, or else in the language of the existing build, or
+/// else in [`DEFAULT_INSTALL`]. It is rebuilt first with `convert` if there is no build or it is
+/// damaged, if it was built for another language, or if `original/`, `changes/` (or a file in them)
+/// changed after it was built. Removing a file changes its folder.
+pub fn fresh_with(
+    ws: &Workspace,
+    install: Option<Language>,
+    convert: &dyn Convert,
+) -> io::Result<Fresh> {
+    let path = ws.build.join(BUILT_PACK);
+    let built = match fs::metadata(&path) {
+        Ok(metadata) => Some(metadata.modified()?),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    // A build that doesn't verify is simply built again.
+    let existing = built.and_then(|_| BuiltPack::read(&path).ok());
+    let language = install
+        .or(existing.as_ref().map(BuiltPack::language))
+        .unwrap_or(DEFAULT_INSTALL);
+    if let (Some(built), Some(pack)) = (built, existing)
+        && newest_source(ws)? <= built
+        && pack.language() == language
+    {
+        return Ok(Fresh {
+            pack,
+            rebuilt: false,
+        });
+    }
+    let path = build_with(ws, language, convert)?;
+    Ok(Fresh {
+        pack: BuiltPack::read(&path)?,
+        rebuilt: true,
+    })
+}
+
+/// When `original/`, `changes/` or a file in them last changed.
+fn newest_source(ws: &Workspace) -> io::Result<SystemTime> {
+    let mut newest = SystemTime::UNIX_EPOCH;
+    for dir in [&ws.original, &ws.changes] {
+        newest = newest.max(fs::metadata(dir)?.modified()?);
+        for entry in fs::read_dir(dir)? {
+            newest = newest.max(fs::metadata(entry?.path())?.modified()?);
+        }
+    }
+    Ok(newest)
+}
+
 /// Builds the voice pack, converting changes with ffmpeg. See [`build_with`].
 pub fn build(ws: &Workspace, install: Language) -> io::Result<PathBuf> {
     build_with(ws, install, &Ffmpeg)
@@ -89,17 +148,12 @@ pub fn build(ws: &Workspace, install: Language) -> io::Result<PathBuf> {
 /// it again, and writes it to `build/`. Each slot gets its change from `changes/`, converted by
 /// `convert` to the format of the stock clip it replaces, or else its original. The pack is laid out
 /// like the stock pack of `install`, so the headphones install it as that language. English is
-/// refused: the headphones play their built-in English instead of an installed one. Returns the
+/// built, but the headphones probably play their built-in English instead (ADR 0003). Returns the
 /// path of the built pack. Fails with a report if the clips are larger than the [`size::limit`].
 pub fn build_with(ws: &Workspace, install: Language, convert: &dyn Convert) -> io::Result<PathBuf> {
-    if install == Language::English {
-        return Err(invalid(
-            "a voice pack cannot be installed as English: English is built into the headphones, \
-             and they play the built-in English instead; choose another language with --install-lang",
-        ));
-    }
     let stock = read_stock(&ws.stock.join(STOCK_PACK))?;
     let stock_language = stock.language;
+    let stock_base = stock.partition_base;
     let stock_image_sha256 = stock.metadata.image_sha256;
     let resolved = changes::resolve(&changes::list(&ws.changes)?).map_err(|problems| {
         let lines: Vec<String> = problems
@@ -134,8 +188,10 @@ pub fn build_with(ws: &Workspace, install: Language, convert: &dyn Convert) -> i
     let verified = verify(&built, &unpacked)
         .map_err(|e| invalid(format!("the built voice pack failed verification: {e}")))?;
     let unchanged = resolved.iter().all(|change| *change == Change::Original);
+    // Only a stock pack with the same language and layout must come out the same.
     if unchanged
         && stock_language == install.code()
+        && stock_base == INSTALLED_BASE
         && verified.metadata.image_sha256 != stock_image_sha256
     {
         return Err(invalid(

@@ -1,6 +1,10 @@
 //! The seams between the protocols and Bluetooth, so that both can be faked in tests.
 
 use std::io;
+use std::time::Duration;
+
+/// How long to wait for the headphones to say anything, unless a command needs longer.
+pub const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A byte stream to the headphones, such as one RFCOMM channel.
 pub trait Transport {
@@ -8,8 +12,8 @@ pub trait Transport {
     fn send(&mut self, bytes: &[u8]) -> io::Result<()>;
 
     /// Returns the next bytes that arrive, at least one. Fails with [`io::ErrorKind::TimedOut`] when
-    /// nothing arrives in time.
-    fn receive(&mut self) -> io::Result<Vec<u8>>;
+    /// nothing arrives within `timeout`.
+    fn receive(&mut self, timeout: Duration) -> io::Result<Vec<u8>>;
 }
 
 /// A protocol channel to the headphones that sends one command and awaits the reply to it.

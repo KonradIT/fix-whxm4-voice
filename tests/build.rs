@@ -3,10 +3,13 @@ mod common;
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use common::{TempDir, built_pack, clips, unpacked};
 use fix_whxm4_voice::audio::Convert;
-use fix_whxm4_voice::build::{BUILT_PACK, BuiltPack, build, build_with};
+use fix_whxm4_voice::build::{
+    BUILT_PACK, BuiltPack, DEFAULT_INSTALL, build, build_with, fresh_with,
+};
 use fix_whxm4_voice::download::STOCK_PACK;
 use fix_whxm4_voice::language::Language;
 use fix_whxm4_voice::pack::{INSTALLED_BASE, Unpacked, pack, unpack};
@@ -84,18 +87,19 @@ fn the_pack_is_built_as_the_install_language_at_the_installed_base() {
 }
 
 #[test]
-fn english_as_install_language_is_refused() {
+fn english_builds_at_the_installed_base_like_every_install_language() {
+    // The UI warns and asks first; building itself no longer refuses English.
     let tmp = TempDir::new();
     let ws = downloaded(&tmp);
 
-    let error = match build_with(&ws, Language::English, &FakeConvert) {
-        Ok(_) => panic!("build succeeded"),
-        Err(e) => e.to_string(),
-    };
+    let path = build_with(&ws, Language::English, &FakeConvert).unwrap();
 
-    assert!(error.contains("built into the headphones"), "{error}");
-    assert!(error.contains("--install-lang"), "{error}");
-    assert!(!ws.build.join(BUILT_PACK).exists());
+    let built = BuiltPack::read(&path).unwrap();
+    assert_eq!(built.language(), Language::English);
+    assert_eq!(
+        unpack(built.bytes()).unwrap().partition_base,
+        INSTALLED_BASE
+    );
 }
 
 #[test]
@@ -288,7 +292,7 @@ fn a_pack_not_laid_out_as_build_lays_it_out_is_not_accepted_as_built() {
     let english = BuiltPack::verify(english).err().unwrap().to_string();
     let at_stock_base = BuiltPack::verify(at_stock_base).err().unwrap().to_string();
 
-    assert!(english.contains("English"), "{english}");
+    assert!(english.contains("0x80000"), "{english}");
     assert!(at_stock_base.contains("0x80000"), "{at_stock_base}");
 }
 
@@ -309,4 +313,136 @@ fn a_pack_in_a_language_build_never_writes_is_not_accepted_as_built() {
     let err = BuiltPack::verify(unknown).err().unwrap().to_string();
 
     assert!(err.contains("0xff"), "{err}");
+}
+
+/// Sets the modification time of `path` to `seconds` after an arbitrary fixed moment.
+fn modified(path: &Path, seconds: u64) {
+    let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000 + seconds);
+    fs::File::open(path).unwrap().set_modified(time).unwrap();
+}
+
+/// A workspace with the change `00-mine.wav` and a German build of the originals alone, so that a
+/// rebuild shows in slot 0. Every source is older than the build.
+fn built(tmp: &TempDir) -> Workspace {
+    let ws = downloaded(tmp);
+    build_with(&ws, Language::German, &FakeConvert).unwrap();
+    fs::write(ws.changes.join("00-mine.wav"), b"mine").unwrap();
+    for dir in [&ws.original, &ws.changes] {
+        for entry in fs::read_dir(dir).unwrap() {
+            modified(&entry.unwrap().path(), 0);
+        }
+        modified(dir, 0);
+    }
+    modified(&ws.build.join(BUILT_PACK), 10);
+    ws
+}
+
+fn first_clip(pack: &BuiltPack) -> Vec<u8> {
+    unpack(pack.bytes()).unwrap().clips[0].clone()
+}
+
+#[test]
+fn a_build_newer_than_every_source_is_used_as_it_is() {
+    let tmp = TempDir::new();
+    let ws = built(&tmp);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert!(!fresh.rebuilt);
+    assert_eq!(first_clip(&fresh.pack), clips()[0]);
+}
+
+#[test]
+fn a_change_newer_than_the_build_rebuilds_it() {
+    let tmp = TempDir::new();
+    let ws = built(&tmp);
+    modified(&ws.changes.join("00-mine.wav"), 20);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert!(fresh.rebuilt);
+    assert!(first_clip(&fresh.pack).starts_with(b"mine"));
+}
+
+#[test]
+fn a_removed_change_rebuilds_the_build() {
+    let tmp = TempDir::new();
+    let ws = built(&tmp);
+    fs::remove_file(ws.changes.join("00-mine.wav")).unwrap();
+    modified(&ws.changes, 20);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert!(fresh.rebuilt);
+}
+
+#[test]
+fn an_original_newer_than_the_build_rebuilds_it() {
+    let tmp = TempDir::new();
+    let ws = built(&tmp);
+    modified(&ws.original.join(clip_file_name(3)), 20);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert!(fresh.rebuilt);
+}
+
+#[test]
+fn a_missing_build_is_built() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert!(fresh.rebuilt);
+    assert!(ws.build.join(BUILT_PACK).is_file());
+}
+
+#[test]
+fn a_build_for_another_install_language_is_rebuilt() {
+    let tmp = TempDir::new();
+    let ws = built(&tmp);
+
+    let fresh = fresh_with(&ws, Some(Language::Swedish), &FakeConvert).unwrap();
+
+    assert!(fresh.rebuilt);
+    assert_eq!(fresh.pack.language(), Language::Swedish);
+}
+
+#[test]
+fn without_an_install_language_a_stale_build_is_rebuilt_in_its_own_language() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+    build_with(&ws, Language::Swedish, &FakeConvert).unwrap();
+    modified(&ws.build.join(BUILT_PACK), 0);
+    fs::write(ws.changes.join("00-mine.wav"), b"mine").unwrap();
+    modified(&ws.changes.join("00-mine.wav"), 20);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert!(fresh.rebuilt);
+    assert_eq!(fresh.pack.language(), Language::Swedish);
+}
+
+#[test]
+fn without_an_install_language_or_a_build_the_default_is_used() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert_eq!(fresh.pack.language(), DEFAULT_INSTALL);
+    assert_eq!(DEFAULT_INSTALL, Language::German);
+}
+
+#[test]
+fn a_damaged_build_is_rebuilt() {
+    let tmp = TempDir::new();
+    let ws = built(&tmp);
+    fs::write(ws.build.join(BUILT_PACK), b"damaged").unwrap();
+    modified(&ws.build.join(BUILT_PACK), 10);
+
+    let fresh = fresh_with(&ws, None, &FakeConvert).unwrap();
+
+    assert!(fresh.rebuilt);
 }

@@ -2,15 +2,16 @@ mod common;
 
 use std::cell::RefCell;
 use std::io;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use common::built_pack;
 use fix_whxm4_voice::build::BuiltPack;
 use fix_whxm4_voice::fota::{self, Partition, u32_at};
+use fix_whxm4_voice::language::Language;
 use fix_whxm4_voice::link::Link;
 use fix_whxm4_voice::mdr::Message;
 use fix_whxm4_voice::race::Packet;
-use fix_whxm4_voice::upload::{self, Mode};
+use fix_whxm4_voice::upload::{self, Mode, Operator, Outcome};
 use sha2::{Digest, Sha256};
 
 const PARTITION: Partition = Partition {
@@ -24,15 +25,19 @@ const PARTITION: Partition = Partition {
 /// partition's flash. Flash behaves like NOR flash: erasing sets bytes to 0xFF, programming can
 /// only clear bits.
 struct Device {
-    /// Every command that reached the headphones, as `MDR on`, `MDR off`, `0x1c08` or, for a state
-    /// write, `0x1c06 0200`.
+    /// Every command that reached the headphones, as `MDR language` (the current-language query),
+    /// `MDR on`, `MDR off`, `0x1c08` or, for a state write, `0x1c06 0200`.
     log: Vec<String>,
+    /// The active voice-guidance language, as an MDR language code.
+    language: u8,
     update_mode: bool,
     state: u16,
     partition: Partition,
     flash: Vec<u8>,
     /// Makes the integrity check fail whatever flash holds.
     fail_integrity: bool,
+    /// Makes the commit go unanswered, without the link dropping.
+    silent_commit: bool,
     /// The pack the integrity check expects at the start of the partition.
     expected: Vec<u8>,
 }
@@ -42,10 +47,12 @@ impl Device {
         Device {
             log: Vec::new(),
             update_mode: false,
+            language: 0x01,
             state: fota::STATE_NONE,
             partition: PARTITION,
             flash: vec![flash_byte; PARTITION.length as usize],
             fail_integrity: false,
+            silent_commit: false,
             expected: built_pack(),
         }
     }
@@ -131,6 +138,12 @@ impl Device {
                 }
                 reply.extend([0x01, 0x00, p[2]]);
             }
+            fota::COMMIT if self.silent_commit => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "no RACE reply to 0x1c02",
+                ));
+            }
             fota::COMMIT => {
                 // The headphones restart to install the pack, which drops the link.
                 return Err(io::Error::new(
@@ -149,6 +162,13 @@ impl Device {
     }
 
     fn mdr(&mut self, command: &Message) -> io::Result<Message> {
+        if command.payload == [0x46, 0x01, 0x02] {
+            self.log.push("MDR language".into());
+            return Ok(Message {
+                data_type: command.data_type,
+                payload: vec![0x47, 0x01, 0x02, self.language],
+            });
+        }
         let [0x44, 0x01, 0x02, value] = command.payload[..] else {
             panic!("unexpected MDR command {:02x?}", command.payload);
         };
@@ -179,18 +199,67 @@ impl Link<Message> for Mdr {
     }
 }
 
-/// Runs the upload of the built pack in `mode` against `device`, and returns the device again.
-fn upload(device: Device, mode: Mode) -> (io::Result<upload::Plan>, Device) {
+/// The user, answering the confirmation with `answer`, and what they were shown.
+struct User {
+    answer: bool,
+    device: Weak<RefCell<Device>>,
+    /// The plan and the device's log at each confirmation.
+    confirmed: Vec<(String, Vec<String>)>,
+    /// Each progress report, with the last command the device had received by then.
+    progress: Vec<(usize, usize, String)>,
+}
+
+impl Operator for User {
+    fn confirm(&mut self, plan: &upload::Plan) -> io::Result<bool> {
+        let log = self.device.upgrade().unwrap().borrow().log.clone();
+        self.confirmed.push((plan.to_string(), log));
+        Ok(self.answer)
+    }
+
+    fn progress(&mut self, done: usize, total: usize) {
+        let last = self
+            .device
+            .upgrade()
+            .unwrap()
+            .borrow()
+            .log
+            .last()
+            .cloned()
+            .unwrap_or_default();
+        self.progress.push((done, total, last));
+    }
+}
+
+/// Runs the upload of the built pack in `mode` against `device`, with a user answering `answer`,
+/// and returns the device and the user again.
+fn run(device: Device, mode: Mode, answer: bool) -> (io::Result<Outcome>, Device, User) {
     let device = Rc::new(RefCell::new(device));
     let pack = BuiltPack::verify(built_pack()).unwrap();
+    let mut user = User {
+        answer,
+        device: Rc::downgrade(&device),
+        confirmed: Vec::new(),
+        progress: Vec::new(),
+    };
     let result = upload::run(
         &mut Mdr(device.clone()),
         &mut Race(device.clone()),
         &pack,
         mode,
+        &mut user,
     );
     let device = Rc::try_unwrap(device).ok().unwrap().into_inner();
-    (result, device)
+    (result, device, user)
+}
+
+/// Runs the upload in `mode` against `device`, the user confirming, and returns the device again.
+fn upload(device: Device, mode: Mode) -> (io::Result<upload::Plan>, Device) {
+    let (result, device, _) = run(device, mode, true);
+    let plan = result.map(|outcome| match outcome {
+        Outcome::Planned(plan) | Outcome::Committed(plan) => plan,
+        Outcome::Declined(_) => panic!("declined"),
+    });
+    (plan, device)
 }
 
 /// The log with repeated commands collapsed into one, such as one `0x0404` for every erase.
@@ -230,6 +299,7 @@ fn an_upload_sends_the_apps_steps_in_the_apps_order() {
     assert_eq!(
         steps(&device),
         [
+            "MDR language",
             "MDR on",
             "0x0a00",
             "0x1c08",
@@ -347,7 +417,7 @@ fn a_dry_run_changes_nothing_and_switches_update_mode_off_again() {
         assert_eq!(count(&device, write), 0, "{write}");
     }
     assert!(device.flash.iter().all(|&b| b == 0x00));
-    assert_eq!(device.log.first().unwrap(), "MDR on");
+    assert_eq!(device.log[..2], ["MDR language", "MDR on"]);
     assert_eq!(device.log.last().unwrap(), "MDR off");
     assert!(!device.update_mode);
 }
@@ -392,23 +462,6 @@ fn a_partition_too_small_for_the_pack_is_refused_before_any_range_is_sent() {
 }
 
 #[test]
-fn a_staged_image_awaiting_its_commit_is_refused_without_a_transfer() {
-    let mut device = Device::new(0x00);
-    device.state = fota::STATE_CHECKED;
-
-    let (result, device) = upload(device, Mode::Upload);
-
-    let err = result.unwrap_err().to_string();
-    assert!(err.contains("never committed"), "{err}");
-    assert_eq!(
-        steps(&device),
-        [
-            "MDR on", "0x0a00", "0x1c08", "0x1c1c", "0x1c00", "0x1c04", "MDR off"
-        ]
-    );
-}
-
-#[test]
 fn a_state_missing_from_the_protocol_notes_is_reported_as_such() {
     let mut device = Device::new(0xFF);
     // What the user's headphones reported in the hand run of ticket 09.
@@ -421,4 +474,180 @@ fn a_state_missing_from_the_protocol_notes_is_reported_as_such() {
         report.contains("0x0101 (not in the protocol notes)"),
         "{report}"
     );
+}
+
+#[test]
+fn the_user_sees_the_plan_before_anything_is_written() {
+    let (result, _, user) = run(Device::new(0x00), Mode::Upload, true);
+
+    result.unwrap();
+    let [(plan, log)] = &user.confirmed[..] else {
+        panic!("asked {} times", user.confirmed.len());
+    };
+    for write in WRITES {
+        assert!(
+            !log.iter().any(|s| s == write),
+            "{write} before the confirmation"
+        );
+    }
+    let end = PARTITION.address as usize + fota::rounded(built_pack().len());
+    for expected in [
+        format!("{} bytes", built_pack().len()),
+        format!("0x08100000..{end:#010x}"),
+        "German".to_string(),
+    ] {
+        assert!(plan.contains(&expected), "{expected} not in:\n{plan}");
+    }
+}
+
+#[test]
+fn declining_writes_nothing_and_switches_update_mode_off() {
+    let (result, device, _) = run(Device::new(0x00), Mode::Upload, false);
+
+    assert!(matches!(result.unwrap(), Outcome::Declined(_)));
+    for write in WRITES {
+        assert_eq!(count(&device, write), 0, "{write}");
+    }
+    assert!(device.flash.iter().all(|&b| b == 0x00));
+    assert_eq!(device.log.last().unwrap(), "MDR off");
+}
+
+#[test]
+fn a_dry_run_asks_nothing() {
+    let (result, _, user) = run(Device::new(0x00), Mode::DryRun, false);
+
+    assert!(matches!(result.unwrap(), Outcome::Planned(_)));
+    assert!(user.confirmed.is_empty());
+}
+
+#[test]
+fn progress_completes_only_with_the_passed_checksum_check() {
+    let (result, _, user) = run(Device::new(0x00), Mode::Upload, true);
+
+    assert!(matches!(result.unwrap(), Outcome::Committed(_)));
+    let (done, total, last) = user.progress.last().unwrap();
+    assert_eq!(done, total);
+    assert_eq!(last, "0x1c01");
+    assert!(user.progress.windows(2).all(|w| w[0].0 < w[1].0));
+    assert!(user.progress.iter().rev().skip(1).all(|(d, t, _)| d < t));
+}
+
+#[test]
+fn a_rejected_pack_never_reaches_full_progress_and_explains_how_to_restore_stock() {
+    let mut device = Device::new(0x00);
+    device.fail_integrity = true;
+
+    let (result, _, user) = run(device, Mode::Upload, true);
+
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("checksum check"), "{err}");
+    assert!(err.contains("Sony app"), "{err}");
+    assert!(user.progress.iter().all(|(d, t, _)| d < t));
+}
+
+#[test]
+fn the_plan_warns_when_the_install_language_is_already_active() {
+    let mut device = Device::new(0xFF);
+    device.language = 0x03;
+
+    let (result, _) = upload(device, Mode::DryRun);
+
+    let plan = result.unwrap();
+    assert!(plan.install_language_active());
+    assert!(plan.to_string().contains("may ignore"), "{plan}");
+}
+
+#[test]
+fn the_plan_does_not_warn_when_another_language_is_active() {
+    let (result, _) = upload(Device::new(0xFF), Mode::DryRun);
+
+    let plan = result.unwrap();
+    assert!(!plan.install_language_active());
+    assert!(!plan.to_string().contains("may ignore"), "{plan}");
+}
+
+#[test]
+fn a_checked_pack_awaiting_its_commit_that_is_another_pack_is_overwritten() {
+    let mut device = Device::new(0x00);
+    device.state = fota::STATE_CHECKED;
+
+    let (result, device, user) = run(device, Mode::Upload, true);
+
+    assert!(matches!(result.unwrap(), Outcome::Committed(_)));
+    let (plan, log) = &user.confirmed[0];
+    assert!(
+        plan.contains("another pack, checked, waits to be installed; this upload replaces it"),
+        "{plan}"
+    );
+    for write in WRITES {
+        assert!(
+            !log.iter().any(|s| s == write),
+            "{write} before the confirmation"
+        );
+    }
+    let pack = built_pack();
+    assert_eq!(device.flash[..pack.len()], pack);
+    assert_eq!(count(&device, "0x1c01"), 1);
+}
+
+#[test]
+fn a_checked_pack_awaiting_its_commit_that_is_this_pack_is_only_committed() {
+    let mut device = Device::new(0xFF);
+    let pack = built_pack();
+    device.flash[..pack.len()].copy_from_slice(&pack);
+    device.state = fota::STATE_CHECKED;
+
+    let (result, device, user) = run(device, Mode::Upload, true);
+
+    assert!(matches!(result.unwrap(), Outcome::Committed(_)));
+    let (plan, _) = &user.confirmed[0];
+    assert!(plan.contains("only the install command"), "{plan}");
+    for write in &WRITES[..WRITES.len() - 1] {
+        assert_eq!(count(&device, write), 0, "{write}");
+    }
+    assert_eq!(device.log[device.log.len() - 2..], ["MDR on", "0x1c02"]);
+}
+
+#[test]
+fn declining_the_commit_of_a_waiting_pack_sends_nothing() {
+    let mut device = Device::new(0xFF);
+    let pack = built_pack();
+    device.flash[..pack.len()].copy_from_slice(&pack);
+    device.state = fota::STATE_CHECKED;
+
+    let (result, device, _) = run(device, Mode::Upload, false);
+
+    assert!(matches!(result.unwrap(), Outcome::Declined(_)));
+    for write in WRITES {
+        assert_eq!(count(&device, write), 0, "{write}");
+    }
+}
+
+#[test]
+fn an_unanswered_install_command_says_the_install_may_still_go_ahead() {
+    let mut device = Device::new(0x00);
+    device.silent_commit = true;
+
+    let (result, _) = upload(device, Mode::Upload);
+
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("may still"), "{err}");
+    assert!(err.contains("device-info"), "{err}");
+}
+
+#[test]
+fn the_plan_of_an_english_pack_warns_that_the_headphones_probably_ignore_it() {
+    let plan = upload::Plan {
+        partition: PARTITION,
+        state: fota::STATE_NONE,
+        pack_len: 0x1000,
+        install: Language::English,
+        active: 0x03,
+        blocks: Vec::new(),
+    };
+
+    let text = plan.to_string();
+
+    assert!(text.contains("Install as:       English"), "{text}");
+    assert!(text.contains("built-in English"), "{text}");
 }

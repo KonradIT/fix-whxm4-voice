@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use fix_whxm4_voice::link::Transport;
 use fix_whxm4_voice::pack::{Metadata, Unpacked};
@@ -72,6 +73,8 @@ pub fn unpacked(clips: Vec<Vec<u8>>) -> Unpacked {
 /// A transport that hands out prepared chunks, one per receive, and records everything sent.
 pub struct FakeTransport {
     pub sent: Vec<Vec<u8>>,
+    /// The timeout of every receive.
+    pub timeouts: Vec<Duration>,
     replies: VecDeque<Vec<u8>>,
 }
 
@@ -80,6 +83,7 @@ impl FakeTransport {
     pub fn replying(replies: Vec<Vec<u8>>) -> Self {
         FakeTransport {
             sent: Vec::new(),
+            timeouts: Vec::new(),
             replies: replies.into(),
         }
     }
@@ -91,7 +95,8 @@ impl Transport for FakeTransport {
         Ok(())
     }
 
-    fn receive(&mut self) -> io::Result<Vec<u8>> {
+    fn receive(&mut self, timeout: Duration) -> io::Result<Vec<u8>> {
+        self.timeouts.push(timeout);
         self.replies
             .pop_front()
             .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "no reply"))

@@ -8,8 +8,9 @@ use std::process::{Command, Stdio};
 
 use crate::invalid;
 
-/// Length of a silent clip, in seconds.
-const SILENCE_SECONDS: &str = "0.1";
+/// Length of the silence asked of ffmpeg, in seconds. Any length this short comes out as the
+/// shortest clip LAME encodes: two frames, 48 ms at 48 kHz.
+const SILENCE_SECONDS: &str = "0.001";
 
 /// Bitrates of MPEG-1 Layer III by bitrate index, in kbit/s. Index 0 (free format) and 15 are invalid.
 const MPEG1_BITRATES: [u32; 15] = [

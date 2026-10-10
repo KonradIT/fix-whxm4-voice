@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::io;
 
 use crate::invalid;
-use crate::link::{Link, Transport, hex};
+use crate::link::{Link, REPLY_TIMEOUT, Transport, hex};
 
 /// The data type of an acknowledgement.
 pub const ACK: u8 = 0x01;
@@ -162,7 +162,7 @@ impl<T: Transport> MdrLink<T> {
             if let Some(frame) = self.received.pop_front() {
                 return Ok(frame);
             }
-            let bytes = self.transport.receive()?;
+            let bytes = self.transport.receive(REPLY_TIMEOUT)?;
             self.received.extend(self.decoder.push(&bytes)?);
         }
     }

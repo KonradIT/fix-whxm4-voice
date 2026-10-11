@@ -28,7 +28,7 @@ logs every command and reply. This is the safe first contact with the real devic
   expressed there. With the user's go-ahead, two queries not in the APK notes were added and documented
   in `docs/upload-protocol.md`: model name (`04 01`) and firmware version (`04 02`). The only RACE
   command is the `0x0A00` chip-name read, which also proves the RACE channel opens.
-- Hand run on 2026-10-10 against the user's WH-1000XM4 (`XX:XX:XX:XX:XX:XX`): model `WH-1000XM4`,
+- Hand run on 2026-10-10 against the user's WH-1000XM4: model `WH-1000XM4`,
   firmware `3.0.1`, protocol info `70 00`, empty chip name, English active, update mode off,
   category `HP002`, 15 languages with service IDs (`VGIDLPB0401`…`VGIDLPB04F0`, including Russian
   `040A`, Japanese `040B`, Brazilian Portuguese `040D`, Korean `040F` and Chinese `04F0`, which have

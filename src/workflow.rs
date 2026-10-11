@@ -45,22 +45,16 @@ pub fn change_names(ws: &Workspace) -> io::Result<Vec<String>> {
         .collect())
 }
 
-/// Tells the user what is in place once there are `changes`: the originals, and every change.
-pub fn done_steps(ws: &Workspace, changes: &[String]) -> String {
+/// Lists the `changes` in `changes/`, which the default command offers to upload.
+pub fn change_list(ws: &Workspace, changes: &[String]) -> String {
     let noun = if changes.len() == 1 {
         "change"
     } else {
         "changes"
     };
-    let list: Vec<String> = changes
-        .iter()
-        .map(|name| format!("\n       {name}"))
-        .collect();
+    let list: Vec<String> = changes.iter().map(|name| format!("\n  {name}")).collect();
     format!(
-        "Done so far:\n\
-         \x20 1. The originals are in {original}.\n\
-         \x20 2. {count} {noun} in {changes_dir}:{list}",
-        original = ws.original.display(),
+        "{count} {noun} in {changes_dir}:{list}",
         count = changes.len(),
         changes_dir = ws.changes.display(),
         list = list.concat(),

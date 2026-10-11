@@ -5,6 +5,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use crate::invalid;
 use crate::slots::{SLOT_COUNT, clip_file_name};
 
 /// How many original names an unmatched change suggests.
@@ -127,6 +128,22 @@ pub fn resolve(changes: &[ChangeFile]) -> Result<Vec<Change>, Vec<Problem>> {
     } else {
         Err(problems)
     }
+}
+
+/// Lists and resolves the changes in the folder `changes` (see [`resolve`]), failing with every
+/// problem found if any change cannot be applied.
+pub fn check(changes: &Path) -> io::Result<Vec<Change>> {
+    resolve(&list(changes)?).map_err(|problems| {
+        let lines: Vec<String> = problems
+            .iter()
+            .map(|problem| format!("  {problem}"))
+            .collect();
+        invalid(format!(
+            "cannot apply the changes in {}:\n{}",
+            changes.display(),
+            lines.join("\n")
+        ))
+    })
 }
 
 /// The slot whose number `name` starts with, or `None` if it starts with no slot number.

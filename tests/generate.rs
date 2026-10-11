@@ -382,6 +382,19 @@ fn with_english_originals_it_asks_and_defaults_to_no() {
 }
 
 #[test]
+fn the_tones_are_generated_before_the_battery_question() {
+    let tmp = TempDir::new();
+    let (_, dir) = originals_in(&tmp, Some(Language::English));
+
+    let out = run_generate(&tmp, &dir, &[], "\n");
+
+    let stderr = stderr(&out);
+    let tones = stderr.find("00-power-on.wav").expect(&stderr);
+    let question = stderr.find("[y/N]").expect(&stderr);
+    assert!(tones < question, "{stderr}");
+}
+
+#[test]
 fn with_english_originals_yes_extracts_the_battery_clips() {
     let tmp = TempDir::new();
     let (ws, dir) = originals_in(&tmp, Some(Language::English));

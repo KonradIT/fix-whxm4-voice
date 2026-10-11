@@ -10,7 +10,7 @@ use fix_whxm4_voice::language::Language;
 use fix_whxm4_voice::pack::pack;
 use fix_whxm4_voice::slots::{SLOT_COUNT, clip_file_name};
 use fix_whxm4_voice::source::Stock;
-use fix_whxm4_voice::workflow::{build_report, change_names, done_steps, next_steps, prepare};
+use fix_whxm4_voice::workflow::{build_report, change_list, change_names, next_steps, prepare};
 use fix_whxm4_voice::workspace::Workspace;
 
 fn workspace(tmp: &TempDir) -> Workspace {
@@ -163,7 +163,7 @@ fn default_command_with_changes_offers_an_upload_that_defaults_to_no() {
 
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
-    assert!(stderr.contains("Done so far"), "{stderr}");
+    assert!(stderr.contains("1 change in"), "{stderr}");
     assert!(stderr.contains("00-mine.wav"), "{stderr}");
     assert!(!stderr.contains("Next steps"), "{stderr}");
     assert!(stderr.contains("Upload 1 change now? [y/N]"), "{stderr}");
@@ -192,13 +192,12 @@ fn default_command_without_changes_offers_no_upload() {
 }
 
 #[test]
-fn done_steps_name_the_originals_and_every_change() {
+fn the_change_list_names_the_changes_folder_and_every_change() {
     let tmp = TempDir::new();
     let ws = workspace(&tmp);
 
-    let text = done_steps(&ws, &["00-mine.wav".into(), "05-silent.wav".into()]);
+    let text = change_list(&ws, &["00-mine.wav".into(), "05-silent.wav".into()]);
 
-    assert!(text.contains(&ws.original.display().to_string()), "{text}");
     assert!(text.contains(&ws.changes.display().to_string()), "{text}");
     assert!(text.contains("2 changes"), "{text}");
     assert!(text.contains("00-mine.wav"), "{text}");
@@ -285,4 +284,25 @@ fn building_without_an_install_language_builds_german_without_asking() {
     assert!(!stderr.contains("[y/N]"), "{stderr}");
     let built = fix_whxm4_voice::build::BuiltPack::read(&ws.build.join("pack.bin")).unwrap();
     assert_eq!(built.language(), Language::German);
+}
+
+#[test]
+fn default_command_refuses_unmatched_changes_before_offering_the_upload() {
+    let tmp = TempDir::new();
+    let dir = tmp.path().join("ws");
+    let ws = Workspace::open(&dir, true, |_, _| unreachable!())
+        .unwrap()
+        .unwrap();
+    prepare(&ws, Language::English, fetch).unwrap();
+    fs::write(ws.changes.join("mine.wav"), b"mine").unwrap();
+
+    let out = run(&["-d", dir.to_str().unwrap(), "-f"]);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("mine.wav does not start with a slot number"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("[y/N]"), "{stderr}");
 }

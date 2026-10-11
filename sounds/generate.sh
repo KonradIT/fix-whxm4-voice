@@ -40,15 +40,22 @@ volume=-7dB
 dot_length=0.05
 # Pause after a dot, in seconds.
 pause=0.06
-# Scratchy effect for bad news, as an ffmpeg filter: random grain mixed into the tone, like a crackly
-# bad radio, raised 4.3 dB to make up for the level the grain takes away.
-scratchy="aeval='val(0)*(1-0.9*random(0))',volume=4.3dB"
+# Crackle, like pulling a live wire: random pops and no tone. Density is the chance that a sample pops;
+# level is the loudness of a pop before the lowpass, relative to the sine of a tone. At 2.5 the pops
+# peak about 2 dB below a tone, and the crackle is far quieter than a dot on average.
+crackle_density=0.02
+crackle_level=2.5
 
 # Notes, in Hz.
 a3=220
 e4=329.63
+g4=392
 a4=440
+b4=493.88
+c5=523.25
+cs5=554.37
 e5=659.25
+f5=698.46
 a5=880
 
 # Prints a filter chain making one tone, labelled [$5], $4 seconds long. Its pitch starts at $1 Hz
@@ -81,11 +88,25 @@ tone() {
         afade=t=out:st=$release_start:d=$fade:curve=$release_curve[$label]"
 }
 
+# Prints a filter chain making a crackle (see crackle_density), labelled [$2], $1 seconds long. It
+# fades in and out like a tone of the same length.
+crackle() {
+    local dur=$1 label=$2
+    local pop="gt(random(0),1-$crackle_density)*(2*random(1)-1)"
+    local fade release_start
+    fade=$(awk "BEGIN { print ($release < $dur / 2) ? $release : $dur / 2 }")
+    release_start=$(awk "BEGIN { print $dur - $fade }")
+    echo "aevalsrc='$crackle_level*$pop':s=$rate:d=$dur,lowpass=f=$lowpass,\
+        afade=t=in:d=$attack:curve=$attack_curve,\
+        afade=t=out:st=$release_start:d=$fade:curve=$release_curve[$label]"
+}
+
 # Writes clip $1, $2 seconds long, made of the parts that follow, played one after another and
 # padded with silence. $3 is an ffmpeg filter applied to the whole clip ("anull" for none). A part
 # is one of:
 #   dot:FREQ                      a dot at FREQ Hz
 #   gap:SECONDS                   silence
+#   crackle                       a crackle as long as a dot
 #   slide:FROM:TO:GLIDE:SECONDS[:CURVE]
 #                                 a tone moving from FROM Hz onto TO Hz, arriving after GLIDE seconds
 #                                 along CURVE (see tone)
@@ -98,6 +119,7 @@ clip() {
         case $kind in
             dot) graph+="$(tone "$a" "$a" 1 "$dot_length" "p$n");" ;;
             gap) graph+="anullsrc=r=$rate:cl=mono,atrim=0:$a[p$n];" ;;
+            crackle) graph+="$(crackle "$dot_length" "p$n");" ;;
             slide) graph+="$(tone "$a" "$b" "$c" "$d" "p$n" "${e:-out}");" ;;
             *) echo "unknown part: $part" >&2 && return 1 ;;
         esac
@@ -133,16 +155,23 @@ clip 04-bluetooth-disconnected.wav 0.3 anull "dot:$a5" "gap:$pause" "$disconnect
 clip 48-device-1-disconnected.wav 0.3 anull "dot:$a5" "gap:$pause" "$disconnect"
 clip 50-device-2-disconnected.wav 0.4 anull "dot:$a5" "gap:$pause" "dot:$a5" "gap:$pause" "$disconnect"
 
-# Slot 34, low battery: three short tones at E5.
-low_battery=("dot:$e5" gap:0.05 "dot:$e5" gap:0.05 "dot:$e5")
-clip 34-low-battery.wav 0.3 anull "${low_battery[@]}"
+# Slot 34, low battery: three tones walking down an A minor chord, E5, C5, A4, to sound sad. Each one
+# sighs: it starts a semitone above its note and sinks onto it. The last is longer and instead starts on
+# its note and sags a whole tone onto G4, like running out of breath.
+low_battery=(
+    "slide:$f5:$e5:0.03:0.07" gap:0.04
+    "slide:$cs5:$c5:0.03:0.07" gap:0.04
+    "slide:$a4:$g4:0.09:0.14:in-out"
+)
+clip 34-low-battery.wav 0.4 anull "${low_battery[@]}"
 # Slot 5, recharge power off: the low battery warning, then power off.
-clip 05-recharge-power-off.wav 0.6 anull "${low_battery[@]}" gap:0.1 "$power_off"
+clip 05-recharge-power-off.wav 0.7 anull "${low_battery[@]}" gap:0.1 "$power_off"
 
-# Slot 11, connection lost: a scratchy fall over the same length as a disconnect.
-clip 11-connection-lost.wav 0.3 "$scratchy" "slide:$a5:$a3:0.2:0.23"
+# Slot 11, connection lost: device 1 disconnected, with a crackle in place of its dot.
+clip 11-connection-lost.wav 0.3 anull crackle "gap:$pause" "$disconnect"
 
-# Slot 39, volume step: one short beep.
-clip 39-unknown-volume-1.wav 0.1 anull "dot:$e5"
+# Slot 39, volume step: one short beep, gliding up a fourth from B4 onto E5, arriving at 40 ms, so it
+# eases in instead of hitting its pitch at once.
+clip 39-unknown-volume-1.wav 0.1 anull "slide:$b4:$e5:0.04:0.06"
 
 echo "generated clips in $out"

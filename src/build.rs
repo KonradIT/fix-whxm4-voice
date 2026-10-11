@@ -155,17 +155,7 @@ pub fn build_with(ws: &Workspace, install: Language, convert: &dyn Convert) -> i
     let stock_language = stock.language;
     let stock_base = stock.partition_base;
     let stock_image_sha256 = stock.metadata.image_sha256;
-    let resolved = changes::resolve(&changes::list(&ws.changes)?).map_err(|problems| {
-        let lines: Vec<String> = problems
-            .iter()
-            .map(|problem| format!("  {problem}"))
-            .collect();
-        invalid(format!(
-            "cannot apply the changes in {}:\n{}",
-            ws.changes.display(),
-            lines.join("\n")
-        ))
-    })?;
+    let resolved = changes::check(&ws.changes)?;
     let clips: Vec<Vec<u8>> = (0..SLOT_COUNT)
         .map(|slot| {
             let stock_clip = &stock.clips[slot];

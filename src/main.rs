@@ -6,6 +6,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use fix_whxm4_voice::bluetooth::{self, Headphones};
 use fix_whxm4_voice::build::{self, BUILT_PACK, BuiltPack, build};
+use fix_whxm4_voice::changes;
 use fix_whxm4_voice::device_info;
 use fix_whxm4_voice::download::{self, download};
 use fix_whxm4_voice::generate::{self, Script};
@@ -130,7 +131,9 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
                 eprintln!("\n{}", workflow::next_steps(&ws, &again));
                 return Ok(ExitCode::SUCCESS);
             }
-            eprintln!("\n{}", workflow::done_steps(&ws, &changes));
+            eprintln!("{}", workflow::change_list(&ws, &changes));
+            // Changes that match no slot fail now rather than after the user agreed to upload.
+            changes::check(&ws.changes)?;
             let noun = if changes.len() == 1 {
                 "change"
             } else {
@@ -164,17 +167,11 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
                 (_, true) => Some(false),
                 _ => None,
             };
-            let mut scripts = vec![Script::sounds()];
+            // The tones first, so the battery question comes after they are done.
+            generate_clips(&ws, Script::sounds(), cli.force)?;
             if extract_battery(&ws, flag, cli.lang)? {
-                scripts.push(Script::battery(&ws));
+                generate_clips(&ws, Script::battery(&ws), cli.force)?;
             }
-            let generated = generate::generate(&ws, &scripts, cli.force)?;
-            eprintln!(
-                "generated {} clips in {}: {}",
-                generated.len(),
-                ws.changes.display(),
-                generated.join(", ")
-            );
             Ok(ExitCode::SUCCESS)
         }
         Some(Command::Build) => {
@@ -216,6 +213,18 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+/// Runs `script` into `changes/` and reports the clips it generated.
+fn generate_clips(ws: &Workspace, script: Script, force: bool) -> io::Result<()> {
+    let generated = generate::generate(ws, &[script], force)?;
+    eprintln!(
+        "generated {} clips in {}: {}",
+        generated.len(),
+        ws.changes.display(),
+        generated.join(", ")
+    );
+    Ok(())
 }
 
 /// Whether `generate` also extracts the battery clips: `flag` if given (`--battery` or

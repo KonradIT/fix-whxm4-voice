@@ -298,7 +298,7 @@ fn run_generate(tmp: &TempDir, dir: &Path, args: &[&str], input: &str) -> Output
     let sounds = script(tmp, &["00-power-on.wav"]);
     let battery = script_named(tmp, "battery.sh", &["16-battery-70.wav"]);
     let mut child = Command::new(env!("CARGO_BIN_EXE_fix-whxm4-voice"))
-        .args(["-d", dir.to_str().unwrap(), "-f", "generate"])
+        .args(["generate", "-d", dir.to_str().unwrap(), "-f"])
         .args(args)
         .env(SCRIPT_ENV, sounds.path)
         .env(BATTERY_SCRIPT_ENV, battery.path)

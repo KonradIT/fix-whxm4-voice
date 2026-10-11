@@ -28,6 +28,9 @@
           buildInputs = [ pkgs.dbus ];
           # The audio tests convert clips with ffmpeg, as the tool does.
           nativeCheckInputs = [ pkgs.ffmpeg ];
+          # The completion tests drive bash, zsh and fish, which the dev shell provides; installing the
+          # package should not pull in three shells.
+          checkFlags = [ "--skip=completes_by_the_rules" ];
           # The sound scripts stay scripts so users can read and adapt them; `generate` runs these copies.
           postInstall = ''
             install -Dm755 sounds/generate.sh $out/share/fix-whxm4-voice/generate.sh
@@ -63,6 +66,9 @@
             pkgs.clippy
             pkgs.rust-analyzer
             pkgs.ffmpeg
+            pkgs.bashInteractive
+            pkgs.zsh
+            pkgs.fish
             pkgs.pkg-config
             pkgs.dbus
           ];

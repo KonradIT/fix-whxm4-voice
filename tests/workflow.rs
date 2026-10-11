@@ -90,7 +90,11 @@ fn next_steps_explain_the_changes_and_the_upload_command() {
     let tmp = TempDir::new();
     let ws = workspace(&tmp);
 
-    let text = next_steps(&ws, "fix-whxm4-voice -d ws");
+    let text = next_steps(
+        &ws,
+        "fix-whxm4-voice -d ws",
+        "fix-whxm4-voice generate -d ws",
+    );
 
     let dir = ws.original.parent().unwrap().display().to_string();
     assert!(text.contains(&format!("Next steps, in {dir}:")), "{text}");
@@ -100,7 +104,7 @@ fn next_steps_explain_the_changes_and_the_upload_command() {
     assert!(text.contains("any audio format"), "{text}");
     assert!(text.contains("empty file"), "{text}");
     assert!(text.contains("`fix-whxm4-voice -d ws` again"), "{text}");
-    assert!(text.contains("`fix-whxm4-voice -d ws generate`"), "{text}");
+    assert!(text.contains("`fix-whxm4-voice generate -d ws`"), "{text}");
 }
 
 fn run(args: &[&str]) -> Output {
@@ -140,9 +144,18 @@ fn lang_after_the_download_subcommand_is_parsed() {
 }
 
 #[test]
-fn a_language_before_the_command_is_refused_rather_than_ignored() {
-    for (flag, command) in [("--lang", "download"), ("--install-lang", "upload")] {
-        let out = run(&[flag, "german", command]);
+fn an_option_of_the_default_command_before_another_command_is_refused_rather_than_ignored() {
+    for (args, flag, command) in [
+        (&["--lang", "german", "download"][..], "--lang", "download"),
+        (
+            &["--install-lang", "german", "upload"],
+            "--install-lang",
+            "upload",
+        ),
+        (&["-d", "ws", "generate"], "--dir", "generate"),
+        (&["--force", "build"], "--force", "build"),
+    ] {
+        let out = run(args);
 
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success());
@@ -266,9 +279,9 @@ fn building_as_english_warns_and_builds_nothing_unless_confirmed() {
 
     // The child's stdin is closed, which answers the question with nothing.
     let out = run(&[
+        "build",
         "-d",
         dir.to_str().unwrap(),
-        "build",
         "--install-lang",
         "english",
     ]);
@@ -292,7 +305,7 @@ fn building_without_an_install_language_builds_german_without_asking() {
         .unwrap();
     prepare(&ws, Language::English, fetch).unwrap();
 
-    let out = run(&["-d", dir.to_str().unwrap(), "build"]);
+    let out = run(&["build", "-d", dir.to_str().unwrap()]);
 
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
@@ -320,4 +333,16 @@ fn default_command_refuses_unmatched_changes_before_offering_the_upload() {
         "{stderr}"
     );
     assert!(!stderr.contains("[y/N]"), "{stderr}");
+}
+
+#[test]
+fn japanese_and_chinese_are_base_languages_only() {
+    for language in ["japanese", "chinese"] {
+        let out = run(&["build", "--install-lang", language]);
+
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success());
+        assert!(stderr.contains("invalid value"), "{stderr}");
+        assert!(stderr.contains("brazilian-portuguese"), "{stderr}");
+    }
 }

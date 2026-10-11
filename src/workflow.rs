@@ -22,10 +22,10 @@ pub fn prepare(
     download_with(ws, lang, fetch).map(Some)
 }
 
-/// Tells the user where to put changes or how to generate them, and that running `command`, the
-/// default command, again builds and uploads them. The folders are named relative to the workspace,
-/// which is named once, unless it is the current directory.
-pub fn next_steps(ws: &Workspace, command: &str) -> String {
+/// Tells the user where to put changes or how to run `generate`, the command that generates them,
+/// and that running `command`, the default command, again builds and uploads them. The folders are
+/// named relative to the workspace, which is named once, unless it is the current directory.
+pub fn next_steps(ws: &Workspace, command: &str, generate: &str) -> String {
     let dir = ws.original.parent().unwrap_or(Path::new("."));
     let heading = if dir == Path::new(".") || dir == Path::new("") {
         "Next steps:".to_string()
@@ -38,7 +38,7 @@ pub fn next_steps(ws: &Workspace, command: &str) -> String {
          \x20 2. Put your changes in {CHANGES}/.\n\
          \x20    Name each like the original it overrides (only the leading slot number counts).\n\
          \x20    They may be in any audio format. An empty file means silence.\n\
-         \x20    Or run `{command} generate` for a ready-made theme of tones.\n\
+         \x20    Or run `{generate}` for a ready-made theme of tones.\n\
          \x20 3. Run `{command}` again to build the voice pack and upload it to the headphones.",
         ORIGINAL = FOLDERS[0],
         CHANGES = FOLDERS[1],

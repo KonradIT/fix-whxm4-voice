@@ -2,6 +2,7 @@ pub mod audio;
 pub mod bluetooth;
 pub mod build;
 pub mod changes;
+pub mod completion;
 pub mod device_info;
 pub mod download;
 pub mod fota;

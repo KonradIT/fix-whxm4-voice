@@ -8,11 +8,11 @@ use std::time::Duration;
 
 use clap::error::ErrorKind;
 use clap::parser::ValueSource;
-use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
-use clap_complete::Shell;
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueHint};
 use fix_whxm4_voice::bluetooth::{self, Headphones};
 use fix_whxm4_voice::build::{self, BUILT_PACK, BuiltPack, build};
 use fix_whxm4_voice::changes;
+use fix_whxm4_voice::completion::{self, Shell};
 use fix_whxm4_voice::device_info;
 use fix_whxm4_voice::download::{self, download};
 use fix_whxm4_voice::generate::{self, Script};
@@ -31,14 +31,8 @@ use fix_whxm4_voice::workspace::Workspace;
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
-    /// Workspace directory (created if missing)
-    #[arg(short = 'd', long = "dir", global = true, default_value = ".")]
-    dir: PathBuf,
-
-    /// Set up the workspace without asking, even in a directory holding other things, and let
-    /// `generate` replace changes for the slots it generates
-    #[arg(short = 'f', long = "force", global = true)]
-    force: bool,
+    #[command(flatten)]
+    workspace: WorkspaceArgs,
 
     #[command(flatten)]
     base: BaseLang,
@@ -48,6 +42,17 @@ struct Cli {
 
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+#[derive(Args)]
+struct WorkspaceArgs {
+    /// Workspace directory (created if missing)
+    #[arg(short = 'd', long = "dir", default_value = ".", value_hint = ValueHint::DirPath)]
+    dir: PathBuf,
+
+    /// Set up the workspace without asking, even in a directory holding other things
+    #[arg(short = 'f', long = "force")]
+    force: bool,
 }
 
 #[derive(Args)]
@@ -64,7 +69,7 @@ struct InstallLang {
     /// Without this, `build` builds German, and an upload keeps the language of the existing build,
     /// or builds German if there is none. English is allowed after a warning, but the headphones
     /// probably keep playing their built-in English.
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = Language::install_parser())]
     install_lang: Option<Language>,
 }
 
@@ -72,6 +77,8 @@ struct InstallLang {
 enum Command {
     /// Download the stock voice pack and save its clips in original/
     Download {
+        #[command(flatten)]
+        workspace: WorkspaceArgs,
         #[command(flatten)]
         base: BaseLang,
     },
@@ -89,7 +96,13 @@ enum Command {
     /// English originals by sounds/battery.sh, which also runs on its own: battery.sh <changes-dir>
     /// <original-dir>. Without originals, it offers to download the English ones first. With
     /// originals in another language it says so and skips them.
+    #[command(mut_arg("force", |arg| arg.help(
+        "Set up the workspace without asking, even in a directory holding other things, and replace \
+         changes for the slots it generates"
+    )))]
     Generate {
+        #[command(flatten)]
+        workspace: WorkspaceArgs,
         /// Also extract the battery clips, without asking. Downloads the English originals if there
         /// are none yet
         #[arg(long, conflicts_with = "no_battery")]
@@ -103,11 +116,15 @@ enum Command {
     /// Build the modified voice pack in build/
     Build {
         #[command(flatten)]
+        workspace: WorkspaceArgs,
+        #[command(flatten)]
         install: InstallLang,
     },
     /// Build the voice pack if it is missing or out of date, and upload it to the headphones over
     /// Bluetooth
     Upload {
+        #[command(flatten)]
+        workspace: WorkspaceArgs,
         /// Switch the headphones' language update mode on, report the FOTA partition and what the
         /// upload would erase and write, and switch it off again. Nothing is erased, written,
         /// checked or committed
@@ -134,25 +151,29 @@ enum Command {
 }
 
 /// What Ctrl-C does: [`QUIT`] at once, or while an upload is [`WATCHING`] for it, ask the upload to
-/// stop, which makes it [`STOPPING`].
+/// stop, which makes it [`STOPPING`]. While the upload waits at its confirmation, [`PROMPTING`],
+/// Ctrl-C cancels the upload as any other answer but `upload` would.
 static CTRL_C: AtomicU8 = AtomicU8::new(QUIT);
 const QUIT: u8 = 0;
 const WATCHING: u8 = 1;
-const STOPPING: u8 = 2;
+const PROMPTING: u8 = 2;
+const STOPPING: u8 = 3;
 /// The exit code of a program stopped by Ctrl-C, as shells report it.
 const INTERRUPTED: u8 = 130;
 
 fn main() -> ExitCode {
     let installed = ctrlc::set_handler(|| {
-        if CTRL_C
-            .compare_exchange(WATCHING, STOPPING, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
-        {
+        let stop = |from| {
+            CTRL_C
+                .compare_exchange(from, STOPPING, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        };
+        if stop(WATCHING) {
             eprintln!(
                 "\nstopping after the current command\n\
                  Press Ctrl-C again to quit at once, which may leave language update mode on."
             );
-        } else {
+        } else if !stop(PROMPTING) {
             std::process::exit(INTERRUPTED.into());
         }
     });
@@ -169,13 +190,18 @@ fn main() -> ExitCode {
     }
 }
 
-/// Parses the command line, refusing a language given before a command: it would be the default
-/// command's, and silently ignored.
+/// Parses the command line, refusing an option of the default command given before another command:
+/// it would be silently ignored.
 fn parse() -> Cli {
     let mut cmd = Cli::command();
     let matches = cmd.get_matches_mut();
     if let Some(command) = matches.subcommand_name() {
-        for (id, flag) in [("lang", "--lang"), ("install_lang", "--install-lang")] {
+        for (id, flag) in [
+            ("dir", "--dir"),
+            ("force", "--force"),
+            ("lang", "--lang"),
+            ("install_lang", "--install-lang"),
+        ] {
             if matches.value_source(id) == Some(ValueSource::CommandLine) {
                 cmd.error(
                     ErrorKind::ArgumentConflict,
@@ -191,8 +217,8 @@ fn parse() -> Cli {
 fn run(cli: Cli) -> io::Result<ExitCode> {
     match cli.command {
         None => {
-            let install = cli.install;
-            let ws = open_workspace(&cli.dir, cli.force)?;
+            let (workspace, install) = (cli.workspace, cli.install);
+            let ws = open_workspace(&workspace)?;
             match workflow::prepare(&ws, cli.base.lang, source::fetch)? {
                 Some(count) => eprintln!("saved {count} originals in {}", ws.original.display()),
                 None => eprintln!(
@@ -200,14 +226,17 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
                     ws.original.display()
                 ),
             }
-            let again = if cli.dir == Path::new(".") {
-                "fix-whxm4-voice".to_string()
+            // How to run the default command, and `generate`, on this workspace again.
+            let dir_flag = if workspace.dir == Path::new(".") {
+                String::new()
             } else {
-                format!("fix-whxm4-voice -d {}", cli.dir.display())
+                format!(" -d {}", workspace.dir.display())
             };
+            let again = format!("fix-whxm4-voice{dir_flag}");
+            let generate = format!("fix-whxm4-voice generate{dir_flag}");
             let changes = workflow::change_names(&ws)?;
             if changes.is_empty() {
-                eprintln!("\n{}", workflow::next_steps(&ws, &again));
+                eprintln!("\n{}", workflow::next_steps(&ws, &again, &generate));
                 return Ok(ExitCode::SUCCESS);
             }
             eprintln!("{}", workflow::change_list(&ws, &changes));
@@ -230,32 +259,33 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             let fresh = build::fresh(&ws, install.install_lang)?;
             upload_pack(&fresh.pack, Mode::Upload, false)
         }
-        Some(Command::Download { base }) => {
-            let ws = open_workspace(&cli.dir, cli.force)?;
+        Some(Command::Download { workspace, base }) => {
+            let ws = open_workspace(&workspace)?;
             let count = download(&ws, base.lang)?;
             eprintln!("saved {count} originals in {}", ws.original.display());
             Ok(ExitCode::SUCCESS)
         }
         Some(Command::Generate {
+            workspace,
             battery,
             no_battery,
             base,
         }) => {
-            let ws = open_workspace(&cli.dir, cli.force)?;
+            let ws = open_workspace(&workspace)?;
             let flag = match (battery, no_battery) {
                 (true, _) => Some(true),
                 (_, true) => Some(false),
                 _ => None,
             };
             // The tones first, so the battery question comes after they are done.
-            generate_clips(&ws, Script::sounds(), cli.force)?;
+            generate_clips(&ws, Script::sounds(), workspace.force)?;
             if extract_battery(&ws, flag, base.lang)? {
-                generate_clips(&ws, Script::battery(&ws), cli.force)?;
+                generate_clips(&ws, Script::battery(&ws), workspace.force)?;
             }
             Ok(ExitCode::SUCCESS)
         }
-        Some(Command::Build { install }) => {
-            let ws = open_workspace(&cli.dir, cli.force)?;
+        Some(Command::Build { workspace, install }) => {
+            let ws = open_workspace(&workspace)?;
             let install = install.install_lang.unwrap_or(build::DEFAULT_INSTALL);
             if !confirm_english(Some(install))? {
                 return Ok(ExitCode::FAILURE);
@@ -266,11 +296,12 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Command::Upload {
+            workspace,
             dry_run,
             verbose,
             install,
         }) => {
-            let ws = open_workspace(&cli.dir, cli.force)?;
+            let ws = open_workspace(&workspace)?;
             if !confirm_english(install.install_lang)? {
                 return Ok(ExitCode::FAILURE);
             }
@@ -291,9 +322,7 @@ fn run(cli: Cli) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Some(Command::Completions { shell }) => {
-            let mut cmd = Cli::command();
-            let name = cmd.get_name().to_string();
-            clap_complete::generate(shell, &mut cmd, name, &mut io::stdout());
+            print!("{}", completion::script(&Cli::command(), shell));
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -353,8 +382,8 @@ fn extract_battery(ws: &Workspace, flag: Option<bool>, lang: Language) -> io::Re
     Ok(extract)
 }
 
-fn open_workspace(dir: &Path, force: bool) -> io::Result<Workspace> {
-    Workspace::open(dir, force, confirm_not_dedicated)?
+fn open_workspace(args: &WorkspaceArgs) -> io::Result<Workspace> {
+    Workspace::open(&args.dir, args.force, confirm_not_dedicated)?
         .ok_or_else(|| io::Error::other("aborted, nothing was created"))
 }
 
@@ -479,8 +508,8 @@ fn ask(prompt: &str) -> io::Result<String> {
     Ok(answer.trim().to_string())
 }
 
-/// Like [`ask`], but returns `None` as soon as Ctrl-C asks the upload to stop, rather than waiting
-/// for a line the user is not going to type.
+/// Like [`ask`], but returns `None` as soon as Ctrl-C cancels, rather than waiting for a line the
+/// user is not going to type. Meanwhile Ctrl-C is a quiet answer: nothing is being sent to stop.
 fn ask_or_stop(prompt: &str) -> io::Result<Option<String>> {
     let mut stderr = io::stderr().lock();
     write!(stderr, "{prompt}")?;
@@ -493,9 +522,12 @@ fn ask_or_stop(prompt: &str) -> io::Result<Option<String>> {
         let read = io::stdin().lock().read_line(&mut answer).map(|_| answer);
         let _ = send.send(read);
     });
-    loop {
+    let _ = CTRL_C.compare_exchange(WATCHING, PROMPTING, Ordering::SeqCst, Ordering::SeqCst);
+    let answer = loop {
         if CTRL_C.load(Ordering::SeqCst) == STOPPING {
-            return Ok(None);
+            // Ends the prompt's line, after the ^C the terminal shows.
+            eprintln!("\n");
+            break Ok(None);
         }
         match receive.recv_timeout(Duration::from_millis(100)) {
             Ok(answer) => {
@@ -505,12 +537,14 @@ fn ask_or_stop(prompt: &str) -> io::Result<Option<String>> {
                     eprintln!();
                 }
                 eprintln!();
-                return Ok(Some(answer.trim().to_string()));
+                break Ok(Some(answer.trim().to_string()));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break Ok(None),
         }
-    }
+    };
+    let _ = CTRL_C.compare_exchange(PROMPTING, WATCHING, Ordering::SeqCst, Ordering::SeqCst);
+    answer
 }
 
 fn confirm_not_dedicated(dir: &Path, others: &[String]) -> io::Result<bool> {

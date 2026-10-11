@@ -103,6 +103,21 @@ fn english_builds_at_the_installed_base_like_every_install_language() {
 }
 
 #[test]
+fn japanese_and_chinese_are_refused_as_install_languages_before_anything_is_built() {
+    let tmp = TempDir::new();
+    let ws = downloaded(&tmp);
+
+    for install in [Language::Japanese, Language::Chinese] {
+        let err = build_with(&ws, install, &FakeConvert)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains(&install.name()), "{err}");
+        assert!(!ws.build.join(BUILT_PACK).exists());
+    }
+}
+
+#[test]
 fn the_unchanged_image_matches_the_stock_image_of_the_install_language() {
     let tmp = TempDir::new();
     let german = Unpacked {

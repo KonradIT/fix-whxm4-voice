@@ -50,12 +50,14 @@ impl BuiltPack {
     pub fn verify(bytes: Vec<u8>) -> io::Result<Self> {
         let unpacked = pack::unpack(&bytes)?;
         // Only codes `build` writes: how the firmware treats an unknown one is not known (ADR 0003).
-        let language = Language::from_code(unpacked.language).ok_or_else(|| {
-            invalid(format!(
-                "it installs as language {:#x}, which is none of the languages `build` writes",
-                unpacked.language
-            ))
-        })?;
+        let language = Language::from_code(unpacked.language)
+            .filter(|language| language.installable())
+            .ok_or_else(|| {
+                invalid(format!(
+                    "it installs as language {:#x}, which is none of the languages `build` writes",
+                    unpacked.language
+                ))
+            })?;
         if unpacked.partition_base != INSTALLED_BASE {
             return Err(invalid(format!(
                 "its slot table points at {:#x}, not at {INSTALLED_BASE:#x} where the headphones keep an \
@@ -151,6 +153,12 @@ pub fn build(ws: &Workspace, install: Language) -> io::Result<PathBuf> {
 /// built, but the headphones probably play their built-in English instead (ADR 0003). Returns the
 /// path of the built pack. Fails with a report if the clips are larger than the [`size::limit`].
 pub fn build_with(ws: &Workspace, install: Language, convert: &dyn Convert) -> io::Result<PathBuf> {
+    if !install.installable() {
+        return Err(invalid(format!(
+            "a voice pack cannot be built as {}: its stock pack uses a layout `build` does not write",
+            install.name()
+        )));
+    }
     let stock = read_stock(&ws.stock.join(STOCK_PACK))?;
     let stock_language = stock.language;
     let stock_base = stock.partition_base;

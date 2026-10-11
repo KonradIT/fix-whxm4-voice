@@ -17,8 +17,8 @@ Findings from ticket 07. The headphones were never written to. Contact with them
 - **The user's headphones**: name, UUIDs and SDP records only.
 - **Gadgetbridge**, <https://codeberg.org/Freeyourgadget/Gadgetbridge>, for the MDR device-info query only
   (model name and firmware version), which the APK notes do not cover. Protocol facts only.
-- **All ten stock packs** (`VGIDLPB0401`–`VGIDLPB0410`), downloaded with this tool and unpacked to compare
-  their headers.
+- **All fifteen stock packs** (`VGIDLPB0401`–`VGIDLPB0410` and `VGIDLPB04F0`), downloaded with this tool
+  and unpacked to compare their headers.
 
 Class names below are as jadx printed them. Sony's and Airoha's own packages keep their names; the
 others (`p466p2.c`, `p590t2.g`, …) are obfuscated and only hold for this exact APK build.
@@ -285,7 +285,7 @@ update-mode toggle above, which has no language field. The expected language is 
 own after-reboot check (`mtk.b.i()` / `mtk.b.e()`).
 
 The language is part of the pack. The first u32 of the unpacked image equals the pack's `MdrLanguage`
-code in all ten stock packs:
+code in all fifteen stock packs:
 
 | Pack                 | image u32 @ 0 | first slot offset | slot base (first offset − 0x1B8) |
 |----------------------|---------------|-------------------|----------------------------------|
@@ -298,9 +298,20 @@ code in all ten stock packs:
 | Dutch    `0407`      | `0x07`        | 3670456           | `0x380000`                       |
 | Swedish  `0408`      | `0x08`        | 3670456           | `0x380000`                       |
 | Finnish  `0409`      | `0x09`        | 3670456           | `0x380000`                       |
+| Russian  `040A`      | `0x0A`        | 3670456           | `0x380000`                       |
+| Japanese `040B`      | `0x0B`        | 2621880           | **`0x280000`**                   |
+| Brazilian Portuguese `040D` | `0x0D` | 3670456         | `0x380000`                       |
+| Korean   `040F`      | `0x0F`        | 3670456           | `0x380000`                       |
 | Turkish  `0410`      | `0x10`        | 3670456           | `0x380000`                       |
+| Chinese  `04F0`      | `0xF0`        | 1573304           | **`0x180000`**                   |
 
-All ten packs share the same TLV `0x0012` (`01000000 00100000 00001000 0000380C`): version 1, header
+Sony publishes no pack for Simplified Chinese (`0x0C`) or Traditional Chinese (`0x0E`): their
+`info.xml` returns 404, although the headphones list them. Japanese and Chinese count their slots from
+another base than the `0x380000` that `build` writes, and where the headphones keep a pack installed in
+those languages is not known. So they are base languages only: `--install-lang` refuses them. For the
+other packs at `0x380000`, an unchanged build reproduces the stock unpacked image exactly.
+
+All fifteen packs share the same TLV `0x0012` (`01000000 00100000 00001000 0000380C`): version 1, header
 size `0x1000`, unpacked size `0x100000`, and a last field `0x0C380000`.
 
 ### A "custom" language code: unknown, probably not safe

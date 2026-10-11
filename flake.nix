@@ -53,7 +53,10 @@
               --zsh <($out/bin/fix-whxm4-voice completions zsh) \
               --fish <($out/bin/fix-whxm4-voice completions fish)
           '';
-          meta.mainProgram = "fix-whxm4-voice";
+          meta = {
+            mainProgram = "fix-whxm4-voice";
+            license = pkgs.lib.licenses.mit;
+          };
         };
       });
 

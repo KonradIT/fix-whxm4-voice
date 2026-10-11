@@ -110,3 +110,7 @@ own risk; the authors accept no liability for any damage.
 
 The tool downloads Sony's voice packs from Sony's public update server. No Sony audio is
 distributed with this project.
+
+## License
+
+[MIT](LICENSE)

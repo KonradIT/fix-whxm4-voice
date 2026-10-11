@@ -1,6 +1,6 @@
 # fix-whxm4-voice
 
-This readme is written by a human. All other files are vibe coded.
+This readme was written by a human. All other files were vibe coded.
 
 This tool allows modifying the sound clips of the Sony WH-1000XM4 headphones (tested on firmware `3.0.1`).
 It was created mainly to stop them from chattering over every little thing

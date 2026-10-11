@@ -138,10 +138,13 @@ fn replace(ws: &Workspace, staging: &Path, generated: &[String], force: bool) ->
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!(
-                "{} already holds changes for slots `generate` writes: {}; \
-                 run with -f to replace them",
+                "{} already holds changes for slots `generate` writes:{}\n\
+                 Run with -f to replace them.",
                 ws.changes.display(),
-                conflicts.join(", ")
+                conflicts
+                    .iter()
+                    .map(|name| format!("\n  {name}"))
+                    .collect::<String>()
             ),
         ));
     }

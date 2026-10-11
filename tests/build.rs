@@ -267,7 +267,7 @@ fn a_missing_built_pack_asks_for_a_build() {
 
     let err = BuiltPack::read(&tmp.path().join(BUILT_PACK)).err().unwrap();
 
-    assert!(err.to_string().contains("run `build`"), "{err}");
+    assert!(err.to_string().contains("\nRun `build` first."), "{err}");
 }
 
 #[test]

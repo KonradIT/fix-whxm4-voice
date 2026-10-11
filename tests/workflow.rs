@@ -92,11 +92,15 @@ fn next_steps_explain_the_changes_and_the_upload_command() {
 
     let text = next_steps(&ws, "fix-whxm4-voice -d ws");
 
-    assert!(text.contains(&ws.changes.display().to_string()), "{text}");
-    assert!(text.contains(&ws.original.display().to_string()), "{text}");
+    let dir = ws.original.parent().unwrap().display().to_string();
+    assert!(text.contains(&format!("Next steps, in {dir}:")), "{text}");
+    assert!(text.contains("changes/"), "{text}");
+    assert!(text.contains("original/"), "{text}");
+    assert_eq!(text.matches(&dir).count(), 1, "{text}");
     assert!(text.contains("any audio format"), "{text}");
     assert!(text.contains("empty file"), "{text}");
     assert!(text.contains("`fix-whxm4-voice -d ws` again"), "{text}");
+    assert!(text.contains("`fix-whxm4-voice -d ws generate`"), "{text}");
 }
 
 fn run(args: &[&str]) -> Output {
@@ -133,6 +137,17 @@ fn lang_after_the_download_subcommand_is_parsed() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
     assert!(stderr.contains("english"), "{stderr}");
+}
+
+#[test]
+fn a_language_before_the_command_is_refused_rather_than_ignored() {
+    for (flag, command) in [("--lang", "download"), ("--install-lang", "upload")] {
+        let out = run(&[flag, "german", command]);
+
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success());
+        assert!(stderr.contains(&format!("{command} {flag}")), "{stderr}");
+    }
 }
 
 #[test]

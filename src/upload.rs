@@ -69,6 +69,10 @@ pub trait Operator {
     /// Reports that `done` of the transfer's `total` steps are done. The last step is the
     /// headphones' checksum check, so `done == total` only once they have accepted the pack.
     fn progress(&mut self, done: usize, total: usize);
+
+    /// Whether the person asked to stop. Asked before the confirmation and before every command
+    /// that erases, writes, checks or installs, so an upload stops between two commands.
+    fn interrupted(&mut self) -> bool;
 }
 
 /// How an upload ended, when nothing went wrong.
@@ -129,10 +133,17 @@ pub fn run(
     // The app switches update mode off between the transfer and the install; after a failure,
     // switch it off all the same.
     let off = set_update_mode(mdr, false);
-    let outcome = transferred?;
-    off?;
+    let outcome = match (transferred, off) {
+        (Ok(outcome), off) => off.map(|()| outcome)?,
+        (Err(e), off) if e.kind() == io::ErrorKind::Interrupted => return Err(interrupted(off)),
+        (Err(e), _) => return Err(e),
+    };
 
     if let Outcome::Committed(_) = outcome {
+        // The last chance to stop: the headphones install the pack once it is committed.
+        if operator.interrupted() {
+            return Err(interrupted(Ok(())));
+        }
         let committed = set_update_mode(mdr, true).and_then(|()| commit(&mut race));
         if committed.is_err() {
             let _ = set_update_mode(mdr, false);
@@ -142,8 +153,36 @@ pub fn run(
     Ok(outcome)
 }
 
-/// `e` with [`RESTORE`] appended.
+/// Fails with [`io::ErrorKind::Interrupted`] if the operator asked to stop. [`run`] turns this into
+/// the report of [`interrupted`].
+fn stop_if_interrupted(operator: &mut impl Operator) -> io::Result<()> {
+    if operator.interrupted() {
+        return Err(io::ErrorKind::Interrupted.into());
+    }
+    Ok(())
+}
+
+/// The report of an upload the operator stopped, `off` being the result of switching language update
+/// mode off afterwards.
+fn interrupted(off: io::Result<()>) -> io::Error {
+    let mode = match off {
+        Ok(()) => "language update mode is off again".to_string(),
+        Err(e) => format!("language update mode may still be on ({e})"),
+    };
+    io::Error::new(
+        io::ErrorKind::Interrupted,
+        format!(
+            "interrupted: the upload stopped between two commands, nothing was installed, and {mode}\n\
+             Run `upload` again to continue. The blocks already written are kept and not sent again."
+        ),
+    )
+}
+
+/// `e` with [`RESTORE`] appended, unless the operator stopped the upload.
 fn rejected(e: io::Error) -> io::Error {
+    if e.kind() == io::ErrorKind::Interrupted {
+        return e;
+    }
     io::Error::new(e.kind(), format!("{e}\n{RESTORE}"))
 }
 
@@ -262,6 +301,7 @@ fn transfer<L: Link<Packet>>(
     }
     // A different pack waiting for its commit is written over like any other flash content. The app
     // never does this: it would commit the waiting pack instead.
+    stop_if_interrupted(operator)?;
     if !operator.confirm(&plan)? {
         return Ok(Outcome::Declined(plan));
     }
@@ -335,6 +375,7 @@ fn write<L: Link<Packet>>(
     let total = erases + plan.pages() + 1;
     let mut done = 0;
     operator.progress(done, total);
+    stop_if_interrupted(operator)?;
     fota::check_status(
         &race.request(&fota::start_transaction())?,
         "start transaction",
@@ -348,6 +389,7 @@ fn write<L: Link<Packet>>(
     if !erase.is_empty() {
         write_state(race, fota::STATE_ERASING)?;
         for block in erase {
+            stop_if_interrupted(operator)?;
             let reply = race.request(&fota::erase(storage, block.address))?;
             fota::check_status(&reply, "erase")?;
             confirm_address(&reply, 6, block.address, "erase")?;
@@ -367,6 +409,7 @@ fn write<L: Link<Packet>>(
         for block in program {
             let offset = (block.address - plan.partition.address) as usize;
             for (address, page) in pages(&pack[offset..offset + block.length], block.address) {
+                stop_if_interrupted(operator)?;
                 let reply = race.request(&fota::page_program(storage, address, &page))?;
                 fota::check_status(&reply, "page program")?;
                 confirm_address(&reply, 3, address, "page program")?;
@@ -376,6 +419,7 @@ fn write<L: Link<Packet>>(
         }
     }
 
+    stop_if_interrupted(operator)?;
     let check = race.request(&fota::check_integrity(storage))?;
     if let Err(e) = fota::check_status(&check, "the checksum check") {
         return Err(io::Error::other(format!(
@@ -430,8 +474,9 @@ fn commit<L: Link<Packet>>(race: &mut Guard<L>) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::TimedOut => Err(io::Error::new(
             e.kind(),
             format!(
-                "the headphones neither answered the install command nor restarted within {} s; they may \
-                 still install the pack: once they have restarted, check the language with `device-info`",
+                "the headphones neither answered the install command nor restarted within {} s\n\
+                 They may still install the pack. Once they have restarted, check the language with \
+                 `device-info`.",
                 fota::COMMIT_TIMEOUT.as_secs()
             ),
         )),

@@ -74,7 +74,12 @@ are found, a connection or query fails, or you don't type `upload` when asked.
 ### Stage 2: erasing and writing (the progress bar is moving)
 
 **What can fail:** the connection drops, the headphones turn off or go out of range, they stop
-answering for 5 seconds, they report an error or cancel the upload, or you press Ctrl-C.
+answering for 5 seconds, or they report an error or cancel the upload.
+
+**Stopping it yourself:** press Ctrl-C. The tool finishes the command in flight, sends nothing more,
+switches update mode off and says so. Nothing is installed, and the next `upload` continues where it
+stopped. Ctrl-C up to the checksum check leaves the headphones as below; Ctrl-C after it leaves them
+as in stage 4's first case. A second Ctrl-C quits at once and may leave update mode on.
 
 **State of the headphones:**
 
@@ -131,9 +136,10 @@ error and the headphones are left as in stage 2.
 
 ### Update mode left on
 
-After a failure in stage 2 or 4, or Ctrl-C, update mode may still be on. While it is on, they should
-still play music and take calls. Run `device-info` to see whether it is on. You don't have to do
-anything about it: the next `upload` switches it on anyway, and the Sony app switches it as it needs.
+After a failure in stage 2 or 4, or a second Ctrl-C, update mode may still be on. While it is on,
+they should still play music and take calls. Run `device-info` to see whether it is on. You don't
+have to do anything about it: the next `upload` switches it on anyway, and the Sony app switches it
+as it needs.
 
 ### Is a restart needed?
 

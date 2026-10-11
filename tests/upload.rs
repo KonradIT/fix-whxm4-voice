@@ -205,6 +205,8 @@ struct User {
     device: Weak<RefCell<Device>>,
     /// The plan and the device's log at each confirmation.
     confirmed: Vec<(String, Vec<String>)>,
+    /// Asks to stop once this many progress reports have come, if set.
+    stop_after: Option<usize>,
     /// Each progress report, with the last command the device had received by then.
     progress: Vec<(usize, usize, String)>,
 }
@@ -228,16 +230,31 @@ impl Operator for User {
             .unwrap_or_default();
         self.progress.push((done, total, last));
     }
+
+    fn interrupted(&mut self) -> bool {
+        self.stop_after.is_some_and(|n| self.progress.len() >= n)
+    }
 }
 
 /// Runs the upload of the built pack in `mode` against `device`, with a user answering `answer`,
 /// and returns the device and the user again.
 fn run(device: Device, mode: Mode, answer: bool) -> (io::Result<Outcome>, Device, User) {
+    run_stopping(device, mode, answer, None)
+}
+
+/// Like [`run`], the user asking to stop once `stop_after` progress reports have come, if set.
+fn run_stopping(
+    device: Device,
+    mode: Mode,
+    answer: bool,
+    stop_after: Option<usize>,
+) -> (io::Result<Outcome>, Device, User) {
     let device = Rc::new(RefCell::new(device));
     let pack = BuiltPack::verify(built_pack()).unwrap();
     let mut user = User {
         answer,
         device: Rc::downgrade(&device),
+        stop_after,
         confirmed: Vec::new(),
         progress: Vec::new(),
     };
@@ -640,4 +657,69 @@ fn the_plan_of_an_english_pack_warns_that_the_headphones_probably_ignore_it() {
 
     assert!(text.contains("Install as:       English"), "{text}");
     assert!(text.contains("built-in English"), "{text}");
+}
+
+#[test]
+fn stopping_before_the_confirmation_asks_nothing_and_writes_nothing() {
+    let (result, device, user) = run_stopping(Device::new(0x00), Mode::Upload, true, Some(0));
+
+    let err = result.unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+    assert!(user.confirmed.is_empty());
+    for write in WRITES {
+        assert_eq!(count(&device, write), 0, "{write}");
+    }
+    assert_eq!(device.log.last().unwrap(), "MDR off");
+}
+
+#[test]
+fn stopping_while_writing_stops_between_commands_and_switches_update_mode_off() {
+    let (result, device, user) = run_stopping(Device::new(0x00), Mode::Upload, true, Some(5));
+
+    let err = result.unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+    let err = err.to_string();
+    assert!(err.contains("language update mode is off again"), "{err}");
+    assert!(err.contains("Run `upload` again to continue"), "{err}");
+    assert!(!err.contains("Sony app"), "{err}");
+    assert_eq!(user.progress.len(), 5);
+    assert_eq!(count(&device, "0x1c01"), 0);
+    assert_eq!(count(&device, "0x1c02"), 0);
+    assert_eq!(device.log.last().unwrap(), "MDR off");
+    assert!(!device.update_mode);
+}
+
+#[test]
+fn an_upload_after_stopping_keeps_the_blocks_already_written() {
+    let (_, full, _) = run(Device::new(0x00), Mode::Upload, true);
+    let all_pages = count(&full, "0x0402");
+    let (_, half, user) = run_stopping(Device::new(0x00), Mode::Upload, true, Some(all_pages));
+    let (_, total, _) = user.progress[0];
+    let mut device = half;
+    device.log.clear();
+
+    let (result, device) = upload(device, Mode::Upload);
+
+    result.unwrap();
+    let pack = built_pack();
+    assert_eq!(device.flash[..pack.len()], pack);
+    let sent = count(&device, "0x0404") + count(&device, "0x0402") + 1;
+    assert!(sent < total, "{sent} of {total} steps sent again");
+}
+
+#[test]
+fn stopping_after_the_checksum_check_leaves_the_pack_waiting_for_its_install() {
+    let (_, _, full) = run(Device::new(0x00), Mode::Upload, true);
+    let reports = full.progress.len();
+
+    let (result, device, _) = run_stopping(Device::new(0x00), Mode::Upload, true, Some(reports));
+
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+    assert_eq!(count(&device, "0x1c06 0211"), 1);
+    assert_eq!(count(&device, "0x1c02"), 0);
+    assert_eq!(device.log.last().unwrap(), "MDR off");
+    let (result, _, user) = run(device, Mode::Upload, true);
+    assert!(matches!(result.unwrap(), Outcome::Committed(_)));
+    let (plan, _) = &user.confirmed[0];
+    assert!(plan.contains("only the install command"), "{plan}");
 }

@@ -9,6 +9,7 @@ bluer = { version = "0.17", features = ["bluetoothd", "rfcomm"] }
 cbc = "0.2.1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
+ctrlc = "3.5.2"
 ecb = "0.2.1"
 futures = "0.3"
 lzma-rust2 = { version = "0.21", default-features = false, features = ["std", "encoder", "optimization"] }

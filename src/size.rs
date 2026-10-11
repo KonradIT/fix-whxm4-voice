@@ -60,7 +60,7 @@ pub fn check(
     writeln!(report, "    limit {} ({})", limit.bytes, limit.source).unwrap();
     write!(
         report,
-        "Every clip is already at the bitrate of its slot, so only shorter audio makes the pack smaller. \
+        "Every clip is already at the bitrate of its slot, so only shorter audio makes the pack smaller.\n\
          Trim changes in {0}, or copy originals from {1} into {0} and trim them there, \
          then build again.",
         ws.changes.display(),

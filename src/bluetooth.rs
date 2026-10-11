@@ -87,12 +87,13 @@ async fn find() -> io::Result<(Session, Device, String)> {
     // Without bluetoothd, D-Bus has nobody to ask for the adapter, so both causes end up here.
     let adapter = session.default_adapter().await.map_err(|e| {
         io::Error::other(format!(
-            "no Bluetooth adapter found, or BlueZ is not running (start the bluetooth service): {e}"
+            "no Bluetooth adapter found, or BlueZ is not running: {e}\n\
+             If BlueZ is not running, start the bluetooth service."
         ))
     })?;
     if !adapter.is_powered().await.map_err(io::Error::other)? {
         return Err(io::Error::other(format!(
-            "Bluetooth adapter {} is off",
+            "Bluetooth adapter {} is off\nSwitch it on, e.g. with `bluetoothctl power on`.",
             adapter.name()
         )));
     }
@@ -110,7 +111,8 @@ async fn find() -> io::Result<(Session, Device, String)> {
     match found.len() {
         0 => Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "no headphones found: connect the WH-1000XM4 to this PC first, e.g. with bluetoothctl connect <address>",
+            "no headphones found\n\
+             Connect the WH-1000XM4 to this PC first.",
         )),
         1 => {
             let (device, name) = found.pop().unwrap();
@@ -119,12 +121,12 @@ async fn find() -> io::Result<(Session, Device, String)> {
         _ => {
             let names: Vec<String> = found
                 .iter()
-                .map(|(d, name)| format!("{name} ({})", d.address()))
+                .map(|(d, name)| format!("\n  {name} ({})", d.address()))
                 .collect();
             Err(io::Error::other(format!(
-                "several connected devices offer Sony's control channel, disconnect all but the \
-                 WH-1000XM4: {}",
-                names.join(", ")
+                "several connected devices offer Sony's control channel:{}\n\
+                 Disconnect all but the WH-1000XM4.",
+                names.concat()
             )))
         }
     }

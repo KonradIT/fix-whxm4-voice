@@ -7,7 +7,7 @@ use crate::changes;
 use crate::download::{download_with, downloaded};
 use crate::language::Language;
 use crate::source::Stock;
-use crate::workspace::Workspace;
+use crate::workspace::{FOLDERS, Workspace};
 
 /// Downloads the originals for `lang` from `fetch`, unless the stock pack and every original are
 /// already present. Returns the number of clips downloaded, or `None` if the download was skipped.
@@ -22,18 +22,26 @@ pub fn prepare(
     download_with(ws, lang, fetch).map(Some)
 }
 
-/// Tells the user where to put changes, and that running `command`, the default command, again
-/// builds and uploads them.
+/// Tells the user where to put changes or how to generate them, and that running `command`, the
+/// default command, again builds and uploads them. The folders are named relative to the workspace,
+/// which is named once, unless it is the current directory.
 pub fn next_steps(ws: &Workspace, command: &str) -> String {
+    let dir = ws.original.parent().unwrap_or(Path::new("."));
+    let heading = if dir == Path::new(".") || dir == Path::new("") {
+        "Next steps:".to_string()
+    } else {
+        format!("Next steps, in {}:", dir.display())
+    };
     format!(
-        "Next steps:\n\
-         \x20 1. Listen to the originals in {original}.\n\
-         \x20 2. Put your changes in {changes}.\n\
+        "{heading}\n\
+         \x20 1. Listen to the originals in {ORIGINAL}/.\n\
+         \x20 2. Put your changes in {CHANGES}/.\n\
          \x20    Name each like the original it overrides (only the leading slot number counts).\n\
          \x20    They may be in any audio format. An empty file means silence.\n\
+         \x20    Or run `{command} generate` for a ready-made theme of tones.\n\
          \x20 3. Run `{command}` again to build the voice pack and upload it to the headphones.",
-        original = ws.original.display(),
-        changes = ws.changes.display(),
+        ORIGINAL = FOLDERS[0],
+        CHANGES = FOLDERS[1],
     )
 }
 

@@ -33,14 +33,14 @@ impl BuiltPack {
             io::Error::new(
                 e.kind(),
                 format!(
-                    "cannot read the built voice pack {}: {e}; run `build` first",
+                    "cannot read the built voice pack {}: {e}\nRun `build` first.",
                     path.display()
                 ),
             )
         })?;
         Self::verify(bytes).map_err(|e| {
             invalid(format!(
-                "{} is not a voice pack as `build` makes it: {e}; run `build` again",
+                "{} is not a voice pack as `build` makes it: {e}\nRun `build` again.",
                 path.display()
             ))
         })
@@ -199,7 +199,7 @@ fn read_stock(path: &Path) -> io::Result<Unpacked> {
         io::Error::new(
             e.kind(),
             format!(
-                "cannot read the stock voice pack {}: {e}; run `download` first",
+                "cannot read the stock voice pack {}: {e}\nRun `download` first.",
                 path.display()
             ),
         )
@@ -219,15 +219,15 @@ fn read_original(original: &Path, slot: usize, stock_clip: &[u8]) -> io::Result<
         io::Error::new(
             e.kind(),
             format!(
-                "cannot read {}: {e}; run `download` to restore the originals",
+                "cannot read {}: {e}\nRun `download` to restore the originals.",
                 path.display()
             ),
         )
     })?;
     if clip != stock_clip {
         return Err(invalid(format!(
-            "{} differs from the stock clip; put your version in changes/ instead, and run \
-             `download` to restore the originals",
+            "{} differs from the stock clip\n\
+             Put your version in changes/ instead, and run `download` to restore the originals.",
             path.display()
         )));
     }

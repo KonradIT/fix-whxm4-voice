@@ -24,6 +24,13 @@ No firmware is modified, so I don't really see a reason for them to brick.)
 - [bluez bluetooth service running](https://wiki.archlinux.org/title/bluetooth)
   (probably already running if bluetooth works on your system)
 
+On macOS instead (see [ADR 0006](docs/adr/0006-macos-through-an-iobluetooth-helper.md)):
+
+- the Xcode command line tools (`xcode-select --install`), which build the small Swift Bluetooth helper
+- Rust and `ffmpeg` (e.g. `brew install rustup ffmpeg`)
+- build with `cargo build --release` and run `target/release/fix-whxm4-voice` in place of the `nix shell` step
+- the first command that talks to the headphones makes macOS ask for Bluetooth access for `xm4-rfcomm`
+
 ### Steps
 
 Get the tool with:

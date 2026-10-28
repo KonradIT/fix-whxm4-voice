@@ -6,6 +6,7 @@
 
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -60,6 +61,15 @@ fn helper() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(concat!(env!("OUT_DIR"), "/xm4-rfcomm")))
 }
 
+/// A command running the helper in its own process group. Ctrl-C reaches the whole foreground
+/// group, and the upload, which catches it, still needs the channels to finish the command in flight
+/// and switch update mode off. The helper exits anyway once we close its stdin or exit ourselves.
+fn helper_command() -> Command {
+    let mut command = Command::new(helper());
+    command.process_group(0);
+    command
+}
+
 /// Connected headphones.
 pub struct Headphones {
     pub name: String,
@@ -69,13 +79,15 @@ pub struct Headphones {
 impl Headphones {
     /// Finds the headphones among the connected devices: the one that offers Sony's MDR channel.
     pub fn find() -> io::Result<Self> {
-        let output = Command::new(helper())
+        // Its stderr is captured, not inherited: outside the terminal's foreground group, a write to
+        // the terminal would stop the helper under `stty tostop`.
+        let output = helper_command()
             .args(["list", &MDR_UUID.to_string()])
-            .stderr(Stdio::inherit())
             .output()
             .map_err(|e| {
                 io::Error::new(e.kind(), format!("cannot run {}: {e}", helper().display()))
             })?;
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
         if !output.status.success() {
             return Err(io::Error::other("cannot list Bluetooth devices"));
         }
@@ -113,7 +125,7 @@ impl Headphones {
     pub fn open(&self, uuid: Uuid, label: &'static str, verbose: bool) -> io::Result<Channel> {
         let opening =
             |e: String| io::Error::other(format!("cannot open the {label} channel ({uuid}): {e}"));
-        let mut child = Command::new(helper())
+        let mut child = helper_command()
             .args(["open", &self.address, &uuid.to_string()])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

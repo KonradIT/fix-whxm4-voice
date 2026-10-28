@@ -17,6 +17,8 @@ long-standing `responsibility_spawnattrs_setdisclaim`, becoming its own responsi
 macOS asks the user about `xm4-rfcomm` instead.
 
 Writes are split into pieces no larger than the channel's MTU. Closing the helper's stdin closes the
-channel. The alternatives were Rust bindings to IOBluetooth through `objc2`, which needs a run loop on
+channel. Each helper runs in its own process group: Ctrl-C reaches the terminal's whole foreground
+group, and the upload catches it to stop cleanly over channels a killed helper would have closed.
+The alternatives were Rust bindings to IOBluetooth through `objc2`, which needs a run loop on
 a thread the tool does not own, and a Linux VM, which on Apple Silicon has no Bluetooth unless a USB
 adapter is passed through.
